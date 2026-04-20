@@ -25,6 +25,7 @@
 |------|------|------|------|
 | ADR-000 | 采用 ADR 方法论 | Accepted | 2026-04-20 |
 | ADR-001 | 严格模式 + [ADR-none] 豁免策略 | Accepted | 2026-04-20 |
+| ADR-002 | hooks 安装使用 cp 而非 symlink | Accepted | 2026-04-20 |
 
 ## 状态图例
 
