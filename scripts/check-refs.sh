@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# decision-vc · check-refs.sh
+# spec-vc · check-refs.sh
 #
 # 扫描 ADR 与 git commit 的双向引用完整性,输出三类问题:
 #   1. 孤儿 ADR       :ADR 文件存在,但没有任何 commit 引用它
@@ -16,8 +16,8 @@ ADR_DIR="${ADR_DIR:-doc/arch}"
 SINCE="${1:-}"
 
 if [[ ! -d "$ADR_DIR" ]]; then
-    echo "[decision-vc] ADR 目录不存在:$ADR_DIR" >&2
-    echo "            请先运行 /decision-vc init" >&2
+    echo "[spec-vc] ADR 目录不存在:$ADR_DIR" >&2
+    echo "            请先运行 /spec-vc adr-init" >&2
     exit 2
 fi
 

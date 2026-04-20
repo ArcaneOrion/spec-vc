@@ -28,13 +28,13 @@
 - 每条 git commit 的 subject 行必须包含 `[ADR-NNN]`(引用具体决策)或 `[ADR-none]`(显式豁免)。
 - 严格校验由 `commit-msg` hook 强制执行:缺失引用、引用不存在的 ADR、或引用已废弃的 ADR 均会阻塞 commit。
 
-本决策的工具化实现来自 `decision-vc` skill,提供 `/decision-vc init|new|link|status|list|upgrade` 等命令。
+本决策的工具化实现来自 `spec-vc` skill,提供 `/spec-vc adr-init|new|link|status|list|upgrade` 等命令。
 
 ## Consequences
 
 **积极**:
 - 决策链进入版本控制,可复现、可审计、可被 Agent 读取作为上下文
-- git commit 与 ADR 双向锚定,`/decision-vc status` 可检测漂移
+- git commit 与 ADR 双向锚定,`/spec-vc adr-status` 可检测漂移
 - 新成员(人或 Agent)通过读 ADR 快速获取项目决策史
 
 **消极**:
@@ -55,8 +55,8 @@
 ## References
 
 - **Related ADRs**: 本条为 ADR-000,无前置
-- **Commits**: 本 ADR 对应的 commit 由 `/decision-vc init` 生成,在 commit message 中标记 `[ADR-000]`
+- **Commits**: 本 ADR 对应的 commit 由 `/spec-vc adr-init` 生成,在 commit message 中标记 `[ADR-000]`
 - **Specs**: (尚无 spec-vc 层)
 - **External**:
   - Michael Nygard (2011) · Documenting Architecture Decisions
-  - decision-vc skill README
+  - spec-vc skill README

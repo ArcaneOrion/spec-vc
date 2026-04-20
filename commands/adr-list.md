@@ -2,7 +2,7 @@
 description: 列出当前项目所有 ADR,支持按状态过滤
 ---
 
-# /decision-vc list
+# /spec-vc adr-list
 
 列出 `doc/arch/` 下所有 ADR,按编号排序。
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# decision-vc · commit-msg (严格模式)
+# spec-vc · commit-msg (严格模式)
 # Version: 0.1.0
-# Source: decision-vc skill
+# Source: spec-vc skill
 #
 # 校验 commit message 必须包含 [ADR-NNN] 或 [ADR-none]。
 # [ADR-NNN] 必须引用 doc/arch/adr-NNN.md 中存在的 ADR,且状态未被废弃。
@@ -30,23 +30,23 @@ if ! echo "$SUBJECT" | grep -qE '\[ADR-(none|[0-9]{3,})\]'; then
     # 辅助识别未填充的槽位,给更友好提示
     if echo "$SUBJECT" | grep -qE '\[ADR-\?+\]'; then
         cat >&2 <<'EOF'
-[decision-vc] Commit 被阻塞:检测到未填充的槽位 [ADR-???]
+[spec-vc] Commit 被阻塞:检测到未填充的槽位 [ADR-???]
 
 请把 [ADR-???] 替换为:
   - [ADR-NNN]  引用具体 ADR(NNN 为三位零填充编号,如 007)
   - [ADR-none] 显式豁免(仅限不影响架构的改动)
 
-运行 /decision-vc list 查看可用 ADR 编号
+运行 /spec-vc adr-list 查看可用 ADR 编号
 EOF
     else
         cat >&2 <<'EOF'
-[decision-vc] Commit 被阻塞:subject 必须包含 [ADR-NNN] 或 [ADR-none]
+[spec-vc] Commit 被阻塞:subject 必须包含 [ADR-NNN] 或 [ADR-none]
 
 示例:
     feat(auth): 引入 LDAP 客户端 [ADR-007]
     docs: 修正拼写 [ADR-none]
 
-运行 /decision-vc list 查看可用 ADR 编号
+运行 /spec-vc adr-list 查看可用 ADR 编号
 或使用 [ADR-none] 显式豁免(仅限不影响架构的改动)
 EOF
     fi
@@ -91,7 +91,7 @@ if [[ "$ADR_ID" == "none" ]]; then
     if check_exemption; then
         exit 0
     else
-        echo "[decision-vc] [ADR-none] 不符合豁免规则,请创建 ADR 或调整改动范围" >&2
+        echo "[spec-vc] [ADR-none] 不符合豁免规则,请创建 ADR 或调整改动范围" >&2
         exit 1
     fi
 fi
@@ -100,10 +100,10 @@ fi
 ADR_FILE="${ADR_DIR}/adr-${ADR_ID}.md"
 if [[ ! -f "$ADR_FILE" ]]; then
     cat >&2 <<EOF
-[decision-vc] Commit 被阻塞:引用的 ADR 不存在
+[spec-vc] Commit 被阻塞:引用的 ADR 不存在
     ${ADR_REF} → ${ADR_FILE} (not found)
 
-请确认编号正确,或运行 /decision-vc new "<标题>" 创建新 ADR
+请确认编号正确,或运行 /spec-vc adr-new "<标题>" 创建新 ADR
 EOF
     exit 1
 fi
@@ -124,7 +124,7 @@ debug "STATUS=[${STATUS}]"
 case "${STATUS}" in
     Deprecated|"Superseded"|"Superseded by"*)
         cat >&2 <<EOF
-[decision-vc] Commit 被阻塞:ADR-${ADR_ID} 状态为 "${STATUS}",不应再被引用
+[spec-vc] Commit 被阻塞:ADR-${ADR_ID} 状态为 "${STATUS}",不应再被引用
 
 如确需基于历史决策做补充修正:
   - 创建新 ADR 替代之,或

@@ -12,17 +12,17 @@
 ## 创建新 ADR
 
 ```bash
-/decision-vc new "<简短的名词短语标题>"
+/spec-vc adr-new "<简短的名词短语标题>"
 ```
 
 ## 当前 ADR 列表
 
 <!--
-由 /decision-vc list 按需自动维护。手动修改会在下次运行 list 命令时被覆盖。
+由 /spec-vc adr-list 按需自动维护。手动修改会在下次运行 list 命令时被覆盖。
 init 成功后,此区域会被首次 list 调用填充。
 -->
 
-_(尚无 ADR。运行 `/decision-vc new "<title>"` 创建第一条,或运行 `/decision-vc list` 刷新本表。)_
+_(尚无 ADR。运行 `/spec-vc adr-new "<title>"` 创建第一条,或运行 `/spec-vc adr-list` 刷新本表。)_
 
 ## 状态图例
 
@@ -33,5 +33,5 @@ _(尚无 ADR。运行 `/decision-vc new "<title>"` 创建第一条,或运行 `/d
 
 ## 相关资源
 
-- ADR 模板:由 decision-vc skill 的 `templates/adr.md` 提供
-- 框架说明:decision-vc skill 的 README.md
+- ADR 模板:由 spec-vc skill 的 `templates/adr.md` 提供
+- 框架说明:spec-vc skill 的 README.md

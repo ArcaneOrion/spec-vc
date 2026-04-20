@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# decision-vc · new-adr.sh
+# spec-vc · new-adr.sh
 #
 # 创建新的 ADR 文件,编号自动取当前最大值 + 1。
 # 从 templates/adr.md 渲染,替换占位符。
@@ -32,12 +32,12 @@ SKILL_ROOT="${SKILL_ROOT:-$(dirname "$(dirname "$(realpath "$0")")")}"
 TEMPLATE="${TEMPLATE:-${SKILL_ROOT}/templates/adr.md}"
 
 if [[ ! -d "$ADR_DIR" ]]; then
-    echo "[decision-vc] ADR 目录不存在,请先运行 /decision-vc init" >&2
+    echo "[spec-vc] ADR 目录不存在,请先运行 /spec-vc adr-init" >&2
     exit 2
 fi
 
 if [[ ! -f "$TEMPLATE" ]]; then
-    echo "[decision-vc] 模板文件不存在: $TEMPLATE" >&2
+    echo "[spec-vc] 模板文件不存在: $TEMPLATE" >&2
     exit 2
 fi
 
@@ -57,15 +57,30 @@ DATE=$(date +%Y-%m-%d)
 AUTHOR=$(git config user.name 2>/dev/null || echo "unknown")
 OUTPUT="${ADR_DIR}/adr-${NEXT_NUM}.md"
 
-sed \
-    -e "s/{{NUMBER}}/${NEXT_NUM}/g" \
-    -e "s/{{TITLE}}/${TITLE}/g" \
-    -e "s/{{DATE}}/${DATE}/g" \
-    -e "s/{{AUTHOR}}/${AUTHOR}/g" \
-    -e "s/{{TAGS}}//g" \
-    "$TEMPLATE" > "$OUTPUT"
+# 用 awk 做字面替换,避免 sed 对特殊字符(/ & \ $ 等)敏感。
+# 先把替换值存到环境变量,awk 通过 -v 拿到后直接 gsub 字面量。
+TITLE_VAL="$TITLE" \
+NUMBER_VAL="$NEXT_NUM" \
+DATE_VAL="$DATE" \
+AUTHOR_VAL="$AUTHOR" \
+awk '
+    BEGIN {
+        n = ENVIRON["NUMBER_VAL"]
+        t = ENVIRON["TITLE_VAL"]
+        d = ENVIRON["DATE_VAL"]
+        a = ENVIRON["AUTHOR_VAL"]
+    }
+    {
+        gsub(/\{\{NUMBER\}\}/, n)
+        gsub(/\{\{TITLE\}\}/,  t)
+        gsub(/\{\{DATE\}\}/,   d)
+        gsub(/\{\{AUTHOR\}\}/, a)
+        gsub(/\{\{TAGS\}\}/,   "")
+        print
+    }
+' "$TEMPLATE" > "$OUTPUT"
 
-echo "[decision-vc] 已创建 $OUTPUT"
+echo "[spec-vc] 已创建 $OUTPUT"
 echo ""
 echo "下一步:"
 echo "  1. 填写 Context / Decision / Consequences"

@@ -1,9 +1,16 @@
 # spec-vc
 
-**三层版本控制框架**的工具化实现仓库。
+**三层版本控制框架**的工具化实现仓库。仓库本身即为 Claude Code skill,`name: spec-vc`。
 
-- **当前版本 (v0.1)**:`decision-vc/` skill 落地——ADR + Commit 双向锚定
-- **未来 (v0.3+)**:`spec-vc/` skill 将新增——弱形式化(OpenAPI/Protobuf/JSON Schema/Gherkin)到强形式化(Lean 4/TLA+)的规格版本控制
+## 实现进度
+
+| 层 | 命题类型 | 回答 | 版本化载体 | 子命令族 | 状态 |
+|---|---|---|---|---|---|
+| Layer 1 · Git | descriptive | 做了什么 | 源文件 diff | (git 原生,不由本 skill 提供) | ✅ 基础设施 |
+| Layer 2 · 决策版本控制(ADR) | rationale | 为什么这么选 | Markdown | `/spec-vc adr-*` | 🟢 **v0.1 可用** |
+| Layer 3 · 规格版本控制(可审计) | normative | 应该做什么 | OpenAPI / Protobuf / Gherkin → Lean 4 / TLA+ | `/spec-vc spec-*` | 🟠 **设计开发中** |
+
+**当前仓库只开发到 Layer 2(决策版本控制)**。Layer 3(规格版本控制 / 可审计版本控制)仍在设计开发中,预计随 v0.3 释出。三层并非独立 skill——都在同一个 `spec-vc` skill 内,用子命令前缀区分层。
 
 ## 为什么需要它
 
@@ -13,8 +20,8 @@
 
 但系统的演进还涉及两件事没被版本控制:
 
-- **为什么这么做**(决策 rationale) —— 留在人脑,人会遗忘、会离开。本仓库的 `decision-vc/` skill 用 ADR 的 markdown 文本把它显式化,校验手段是人工审阅。
-- **应该做什么**(规格 normative) —— 需要一份**可机械验证的契约**,而不是散落在测试和文档里的非形式化约束。仓库未来的 `spec-vc/` skill 用 OpenAPI / Protobuf / JSON Schema / Gherkin(弱形式化)乃至 Lean 4 / TLA+(强形式化)作为载体,校验手段是 typechecker / prover / schema validator——**必须由机械过程产出**,不能是 AI 生成的"验证报告",否则规格版本控制退化为高级注释。
+- **为什么这么做**(决策 rationale) —— 留在人脑,人会遗忘、会离开。本 skill 的 `adr-*` 子命令族用 ADR 的 markdown 文本把它显式化,校验手段是人工审阅。
+- **应该做什么**(规格 normative) —— 需要一份**可机械验证的契约**,而不是散落在测试和文档里的非形式化约束。未来的 `spec-*` 子命令族将用 OpenAPI / Protobuf / JSON Schema / Gherkin(弱形式化)乃至 Lean 4 / TLA+(强形式化)作为载体,校验手段是 typechecker / prover / schema validator——**必须由机械过程产出**,不能是 AI 生成的"验证报告",否则规格版本控制退化为高级注释。
 
 Agent 时代把这两个裂缝都放大了:
 
@@ -23,53 +30,52 @@ Agent 时代把这两个裂缝都放大了:
 
 ## 三层命题类型(正交,不可归约)
 
-| 层级 | 对象 | 命题类型 | 回答 | 版本化载体 | 验证方式 |
-|------|------|----------|------|------------|----------|
-| Git | 代码实现 | descriptive | 做了什么 | 源文件 diff | 测试、运行时行为 |
-| Spec VC | 行为规格 | normative | 应该做什么 | OpenAPI / Protobuf / Lean 4 | 类型检查 / 证明 / schema 校验 |
-| ADR | 架构决策 | rationale | 为什么这么选 | Markdown | 人工审阅、上下文一致性 |
+三者正交——用同一个 artifact 承载多种命题类型,必然互相污染。它们通过**显式引用**相互锚定,不是线性栈:一条 ADR 可锚定多个 spec 单元;一个 spec 版本对应一组 code commit 范围。
 
-三者**正交**——用同一个 artifact 承载多种命题类型,必然互相污染。
-
-## 仓库布局
+## 仓库布局(扁平)
 
 ```
-spec-vc/                      ← 本仓库(伞 / 三层框架的主仓)
-├── README.md                 ← 本文件,框架总览
-├── LICENSE                   ← (待定)
-├── decision-vc/              ← v0.1 的 skill
-│   ├── SKILL.md              ← Claude skill 入口(name: decision-vc)
-│   ├── commands/             ← 斜杠命令实现
-│   │   ├── init.md
-│   │   ├── new.md
-│   │   ├── link.md
-│   │   ├── status.md
-│   │   ├── list.md
-│   │   └── upgrade.md
-│   ├── templates/
-│   │   ├── adr.md            ← Nygard 五段式
-│   │   ├── index.md          ← ADR 索引模板
-│   │   ├── commit-msg        ← git commit message 模板
-│   │   └── seed-adr-000.md   ← init 时的种子 ADR(固定内容)
-│   ├── hooks/
-│   │   ├── prepare-commit-msg ← 起草时注入 [ADR-???] 槽位
-│   │   └── commit-msg         ← 严格校验 ADR 引用存在 + 状态有效
-│   ├── scripts/
-│   │   ├── check-refs.sh      ← ADR↔commit 双向引用扫描
-│   │   └── new-adr.sh         ← 自增编号生成 ADR
-│   └── tests/
-│       └── e2e-init.sh        ← 最小端到端测试
-└── (未来:spec-vc-skill/)      ← v0.3 的 normative 层 skill
+spec-vc/                       ← 本仓库即 skill
+├── README.md                  ← 本文件(框架总览 + 实现进度)
+├── LICENSE                    ← (待定)
+├── SKILL.md                   ← Claude skill 入口(name: spec-vc)
+├── commands/                  ← 斜杠命令实现
+│   ├── adr-init.md            ← /spec-vc adr-init
+│   ├── adr-new.md
+│   ├── adr-link.md
+│   ├── adr-status.md
+│   ├── adr-list.md
+│   ├── adr-upgrade.md
+│   └── (未来:spec-init.md / spec-new.md / spec-validate.md / ...)
+├── templates/
+│   ├── adr.md                 ← Nygard 五段式
+│   ├── index.md               ← ADR 索引模板
+│   ├── commit-msg             ← git commit message 模板
+│   └── seed-adr-000.md        ← init 时的种子 ADR(固定内容)
+├── hooks/
+│   ├── prepare-commit-msg     ← 起草时注入 [ADR-???] 槽位
+│   └── commit-msg             ← 严格校验 ADR 引用存在 + 状态有效
+├── scripts/
+│   ├── check-refs.sh          ← ADR↔commit 双向引用扫描
+│   └── new-adr.sh             ← 自增编号生成 ADR
+├── tests/
+│   └── e2e-init.sh            ← 最小端到端测试(12 用例)
+└── doc/                       ← 本仓库自身的决策记录(吃狗粮)
+    └── arch/
+        ├── README.md
+        ├── adr-000.md         ← 采用 ADR 方法论
+        ├── adr-001.md         ← 严格模式 + [ADR-none] 豁免
+        └── adr-NNN.md ...
 ```
 
-初始化一个目标项目(如 Alice)后,目标项目会多出:
+初始化一个目标项目(如 Alice)后,**目标项目**会多出:
 
 ```
 <project>/
 ├── doc/
 │   └── arch/
-│       ├── README.md         ← ADR 索引(由 decision-vc 维护)
-│       ├── adr-000.md        ← 种子:采用 ADR 方法论
+│       ├── README.md          ← ADR 索引(由 spec-vc 维护)
+│       ├── adr-000.md         ← 种子:采用 ADR 方法论
 │       └── adr-NNN.md ...
 └── .git/
     └── hooks/
@@ -79,17 +85,17 @@ spec-vc/                      ← 本仓库(伞 / 三层框架的主仓)
 
 ## 快速使用
 
-前置:你在 Claude Code 中加载了本仓库的 `decision-vc/` 作为 skill。
+前置:你在 Claude Code 中加载了本仓库作为 skill。
 
 ```bash
 # 1. 在目标项目中初始化
 cd /path/to/your/project
 git init  # 若尚未初始化
 # 在 Claude Code 中运行
-/decision-vc init
+/spec-vc adr-init
 
 # 2. 每次做架构决策时
-/decision-vc new "使用 LDAP 进行多租户集成"
+/spec-vc adr-new "使用 LDAP 进行多租户集成"
 # → 生成 doc/arch/adr-007.md,打开编辑器填写五段式
 
 # 3. 写完代码后 commit
@@ -100,10 +106,10 @@ git commit
 # → commit-msg hook 校验 ADR-007 存在且状态有效后放行
 
 # 4. 定期检查三层锚定健康
-/decision-vc status
+/spec-vc adr-status
 
 # 5. 本仓库更新了 hook 后,同步到已初始化项目
-/decision-vc upgrade
+/spec-vc adr-upgrade
 ```
 
 ## Commit message 规范
@@ -123,14 +129,14 @@ refactor(core): 拆分 message bus 为独立模块 [ADR-012]
 docs: 修正 README 拼写 [ADR-none]
 ```
 
-**豁免规则** (`[ADR-none]`):仅限不影响架构的改动。具体判定见 `decision-vc/hooks/commit-msg` 中的 `check_exemption` 函数(当前为占位,需按项目定制)。
+**豁免规则** (`[ADR-none]`):仅限不影响架构的改动。具体判定见 `hooks/commit-msg` 中的 `check_exemption` 函数(当前为占位,需按项目定制)。
 
 ## 路线图
 
-- **v0.1(当前)**:`decision-vc` skill——ADR + Commit 锚定闭环
+- **v0.1(当前)**:`adr-*` 子命令族——ADR + Commit 锚定闭环 🟢
 - **v0.2**:在 Alice 项目做首次实战,迭代严格度参数、打磨 `check_exemption` 规则
-- **v0.3**:新增 `spec-vc/` skill——弱形式化(OpenAPI/Protobuf/JSON Schema/Gherkin)
-- **v0.4**:三层锚定——ADR 引用 Spec 版本,Spec 引用 Code 契约
+- **v0.3**:**引入 `spec-*` 子命令族**——弱形式化(OpenAPI/Protobuf/JSON Schema/Gherkin),对应 Layer 3
+- **v0.4**:三层锚定——ADR 引用 Spec 版本,Spec 引用 Code 契约;三层引用漂移检测
 - **v1.0**:强形式化预留位——Lean 4 / TLA+ 规格的创建和验证
 
 ## 思想基础
@@ -145,4 +151,4 @@ docs: 修正 README 拼写 [ADR-none]
 
 ## Contributing
 
-本仓库遵循自己的规范——内部开发也用 decision-vc 管理架构演进,ADR 存于本仓库 `decision-vc/doc/arch/`(初始化后)。
+本仓库遵循自己的规范——内部开发也用 spec-vc 管理架构演进,ADR 存于本仓库 `doc/arch/`。查看 `doc/arch/README.md` 了解本仓库自身的决策史。

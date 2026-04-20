@@ -2,7 +2,7 @@
 description: 把暂存区的下一次 commit 与指定 ADR 关联
 ---
 
-# /decision-vc link <ADR-NNN>
+# /spec-vc adr-link <ADR-NNN>
 
 手动把暂存区的下一次 commit 关联到指定 ADR。主要用途:
 
@@ -34,12 +34,12 @@ description: 把暂存区的下一次 commit 与指定 ADR 关联
 ## 执行指令给 Claude
 
 1. 归一化 ADR 编号:接受 `7` / `007` / `ADR-7` / `ADR-007`,统一为 `007` 三位格式
-2. 校验 `doc/arch/adr-${ID}.md` 存在;不存在则提示 `/decision-vc new` 或列出可选 ADR
+2. 校验 `doc/arch/adr-${ID}.md` 存在;不存在则提示 `/spec-vc adr-new` 或列出可选 ADR
 3. 询问用户是模式 A 还是模式 B(用 `AskUserQuestion`)
 4. 按对应模式执行
 
 ## 注意事项
 
-- 模式 B 是"事后对齐",经常用来修正 `/decision-vc status` 报告的孤儿 ADR
+- 模式 B 是"事后对齐",经常用来修正 `/spec-vc adr-status` 报告的孤儿 ADR
 - 一条 ADR 可以引用多个 commit(分阶段实现的决策)
 - 一条 commit 只能引用一个 ADR(原则上),如需引用多个请拆分 commit

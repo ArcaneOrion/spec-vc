@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# decision-vc · prepare-commit-msg
+# spec-vc · prepare-commit-msg
 # Version: 0.1.0
-# Source: decision-vc skill
+# Source: spec-vc skill
 #
 # 在 commit message 编辑器打开前,自动注入 [ADR-???] 槽位作为提示。
 # 用户可以替换为具体 ADR 编号或 [ADR-none] 豁免标记。
@@ -43,10 +43,10 @@ fi
 
 cat >> "$COMMIT_MSG_FILE" <<'EOF'
 
-# decision-vc 提示:
+# spec-vc 提示:
 #   [ADR-NNN]  引用具体决策,NNN 为三位零填充编号(如 ADR-007)
 #   [ADR-none] 显式豁免,仅限不影响架构的改动
-# 运行 /decision-vc list 查看现有 ADR 编号
+# 运行 /spec-vc adr-list 查看现有 ADR 编号
 EOF
 
 exit 0

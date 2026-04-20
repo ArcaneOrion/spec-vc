@@ -2,7 +2,7 @@
 description: 创建新的架构决策记录,自动取下一个编号并生成模板
 ---
 
-# /decision-vc new "<title>"
+# /spec-vc adr-new "<title>"
 
 创建新的 ADR 文件。
 
@@ -12,7 +12,7 @@ description: 创建新的架构决策记录,自动取下一个编号并生成模
 
 ## 执行步骤
 
-1. 校验当前目录已初始化 decision-vc(存在 `doc/arch/`)
+1. 校验当前目录已初始化 spec-vc(存在 `doc/arch/`)
 2. 调用 `scripts/new-adr.sh "<title>"`:
    - 扫描现有 ADR 编号,取 max + 1(零填充三位)
    - 从 `templates/adr.md` 渲染,替换 `{{NUMBER}}` / `{{TITLE}}` / `{{DATE}}` / `{{AUTHOR}}`
@@ -27,7 +27,7 @@ description: 创建新的架构决策记录,自动取下一个编号并生成模
 ## 执行指令给 Claude
 
 1. 解析 `$SKILL_ROOT`(见 `SKILL.md` 的"SKILL_ROOT 约定")
-2. 校验 `doc/arch/` 存在;不存在则提示运行 `/decision-vc init`
+2. 校验 `doc/arch/` 存在;不存在则提示运行 `/spec-vc adr-init`
 3. 运行 `env SKILL_ROOT="$SKILL_ROOT" bash "$SKILL_ROOT/scripts/new-adr.sh" "<title>"`
 4. `Read` 生成的 ADR 文件
 5. 与用户对话,引导填写:

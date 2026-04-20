@@ -1,14 +1,14 @@
 ---
-description: 把当前项目 .git/hooks/ 中的 decision-vc hook 升级到本 skill 的最新版本
+description: 把当前项目 .git/hooks/ 中的 spec-vc hook 升级到本 skill 的最新版本
 ---
 
-# /decision-vc upgrade
+# /spec-vc adr-upgrade
 
-升级当前项目 `.git/hooks/` 下的 decision-vc hook 到 `$SKILL_ROOT/hooks/` 的当前版本。
+升级当前项目 `.git/hooks/` 下的 spec-vc hook 到 `$SKILL_ROOT/hooks/` 的当前版本。
 
 ## 背景
 
-`/decision-vc init` 使用 `cp` 策略安装 hooks——独立、稳健,但与 skill 版本会漂移。`upgrade` 命令提供显式同步入口。
+`/spec-vc adr-init` 使用 `cp` 策略安装 hooks——独立、稳健,但与 skill 版本会漂移。`upgrade` 命令提供显式同步入口。
 
 ## 执行步骤(给 Claude 的指令)
 
@@ -42,7 +42,7 @@ commit-msg:
   status : 需升级
 ```
 
-如果版本一致,跳过。如果本地 hook 不含 decision-vc 标识(extract_version 返回 unknown),提示这是外部 hook,询问是否覆盖/备份。
+如果版本一致,跳过。如果本地 hook 不含 spec-vc 标识(extract_version 返回 unknown),提示这是外部 hook,询问是否覆盖/备份。
 
 ### 4. 展示 diff
 
@@ -73,7 +73,7 @@ bash -n .git/hooks/commit-msg  # 语法检查
   - .git/hooks/commit-msg.backup-20260420-202530
 
 下一步:
-  - 运行 /decision-vc status 验证一切正常
+  - 运行 /spec-vc adr-status 验证一切正常
 ```
 
 ## 错误处理
@@ -85,4 +85,4 @@ bash -n .git/hooks/commit-msg  # 语法检查
 
 - skill 仓库 pull 了新版本后
 - 修改本 skill 的 hook 后,同步到已初始化的项目
-- `/decision-vc status` 报告"hook 行为与预期不符"时(未来可能补自检)
+- `/spec-vc adr-status` 报告"hook 行为与预期不符"时(未来可能补自检)

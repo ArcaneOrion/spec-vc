@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# decision-vc · 最小端到端测试
+# spec-vc · 最小端到端测试
 #
 # 验证骨架的核心承诺:
 #   1. init 能正确铺开 doc/arch/ 结构
@@ -37,7 +37,7 @@ commit_msg_test() {
     esac
 }
 
-echo "=== decision-vc e2e ==="
+echo "=== spec-vc e2e ==="
 echo "SKILL_ROOT=$SKILL_ROOT"
 echo "WORK=$WORK"
 echo ""
@@ -50,8 +50,8 @@ git init -q
 git config user.email "test@example.com"
 git config user.name "test"
 
-# --- init(手工模拟 /decision-vc init 的脚本部分) ---
-echo "[setup] 模拟 /decision-vc init"
+# --- init(手工模拟 /spec-vc adr-init 的脚本部分) ---
+echo "[setup] 模拟 /spec-vc adr-init"
 mkdir -p doc/arch
 cp "$SKILL_ROOT/templates/index.md" doc/arch/README.md
 DATE=$(date +%Y-%m-%d)

@@ -12,13 +12,13 @@
 ## 创建新 ADR
 
 ```bash
-/decision-vc new "<简短的名词短语标题>"
+/spec-vc adr-new "<简短的名词短语标题>"
 ```
 
 ## 当前 ADR 列表
 
 <!--
-由 /decision-vc list 按需自动维护。手动修改会在下次运行 list 命令时被覆盖。
+由 /spec-vc adr-list 按需自动维护。手动修改会在下次运行 list 命令时被覆盖。
 -->
 
 | 编号 | 标题 | 状态 | 日期 |
@@ -26,6 +26,7 @@
 | ADR-000 | 采用 ADR 方法论 | Accepted | 2026-04-20 |
 | ADR-001 | 严格模式 + [ADR-none] 豁免策略 | Accepted | 2026-04-20 |
 | ADR-002 | hooks 安装使用 cp 而非 symlink | Accepted | 2026-04-20 |
+| ADR-003 | skill 扁平化 + 命令前缀统一为 /spec-vc adr-* | Accepted | 2026-04-20 |
 
 ## 状态图例
 
@@ -36,5 +37,5 @@
 
 ## 相关资源
 
-- ADR 模板:由 decision-vc skill 的 `templates/adr.md` 提供
-- 框架说明:decision-vc skill 的 README.md
+- ADR 模板:由 spec-vc skill 的 `templates/adr.md` 提供
+- 框架说明:spec-vc skill 的 README.md
