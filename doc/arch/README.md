@@ -19,10 +19,12 @@
 
 <!--
 由 /decision-vc list 按需自动维护。手动修改会在下次运行 list 命令时被覆盖。
-init 成功后,此区域会被首次 list 调用填充。
 -->
 
-_(尚无 ADR。运行 `/decision-vc new "<title>"` 创建第一条,或运行 `/decision-vc list` 刷新本表。)_
+| 编号 | 标题 | 状态 | 日期 |
+|------|------|------|------|
+| ADR-000 | 采用 ADR 方法论 | Accepted | 2026-04-20 |
+| ADR-001 | 严格模式 + [ADR-none] 豁免策略 | Accepted | 2026-04-20 |
 
 ## 状态图例
 
