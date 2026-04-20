@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# decision-vc · prepare-commit-msg
+# Version: 0.1.0
+# Source: decision-vc skill
+#
+# 在 commit message 编辑器打开前,自动注入 [ADR-???] 槽位作为提示。
+# 用户可以替换为具体 ADR 编号或 [ADR-none] 豁免标记。
+#
+# 参数:
+#   $1 = commit message 文件路径
+#   $2 = commit source (message | template | merge | squash | commit)
+#   $3 = commit SHA(仅 amend 时)
+
+set -euo pipefail
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="${2:-}"
+
+# 跳过 merge / squash / amend,这些场景下不打扰用户
+case "$COMMIT_SOURCE" in
+    merge|squash|commit)
+        exit 0
+        ;;
+esac
+
+# 如果 message 已经包含 [ADR-...](含未填充的 [ADR-???] 占位),不重复注入
+if grep -qE '\[ADR-(none|[0-9]{3,}|\?+)\]' "$COMMIT_MSG_FILE"; then
+    exit 0
+fi
+
+# 读取第一行作为 subject
+FIRST_LINE=$(head -n1 "$COMMIT_MSG_FILE" 2>/dev/null || echo "")
+
+# 如果第一行非空且未含 [ADR-...],追加槽位
+if [[ -n "$FIRST_LINE" && ! "$FIRST_LINE" =~ ^# ]]; then
+    TMP_FILE=$(mktemp)
+    {
+        echo "${FIRST_LINE} [ADR-???]"
+        tail -n +2 "$COMMIT_MSG_FILE"
+    } > "$TMP_FILE"
+    mv "$TMP_FILE" "$COMMIT_MSG_FILE"
+fi
+
+cat >> "$COMMIT_MSG_FILE" <<'EOF'
+
+# decision-vc 提示:
+#   [ADR-NNN]  引用具体决策,NNN 为三位零填充编号(如 ADR-007)
+#   [ADR-none] 显式豁免,仅限不影响架构的改动
+# 运行 /decision-vc list 查看现有 ADR 编号
+EOF
+
+exit 0

@@ -1,0 +1,37 @@
+# 架构决策记录索引
+
+本目录存放本项目所有架构决策记录（ADR）。
+
+## 惯例
+
+- 每条 ADR 编号单调递增,从 000 开始,不复用
+- 文件名格式:`adr-NNN.md`(三位数字,零填充)
+- 状态变更不删除旧记录,在文件顶部 Status 字段更新
+- 每次 commit 在 message 中引用相关 ADR:`[ADR-NNN]` 或 `[ADR-none]`
+
+## 创建新 ADR
+
+```bash
+/decision-vc new "<简短的名词短语标题>"
+```
+
+## 当前 ADR 列表
+
+<!--
+由 /decision-vc list 按需自动维护。手动修改会在下次运行 list 命令时被覆盖。
+init 成功后,此区域会被首次 list 调用填充。
+-->
+
+_(尚无 ADR。运行 `/decision-vc new "<title>"` 创建第一条,或运行 `/decision-vc list` 刷新本表。)_
+
+## 状态图例
+
+- **Proposed** — 提议中,尚未达成一致
+- **Accepted** — 已接受,代码可开始实现
+- **Deprecated** — 不再使用但未被替代
+- **Superseded by ADR-XXX** — 被新决策替代
+
+## 相关资源
+
+- ADR 模板:由 decision-vc skill 的 `templates/adr.md` 提供
+- 框架说明:decision-vc skill 的 README.md
