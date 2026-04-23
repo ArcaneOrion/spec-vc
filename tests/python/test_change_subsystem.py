@@ -46,6 +46,70 @@ def test_change_start_creates_plan_and_active(tmp_path: Path):
     assert active.exists()
 
 
+def test_change_clarify_updates_plan(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
+    proc = run(
+        repo,
+        'change', 'clarify',
+        '--goal', '明确改动目标',
+        '--scope', '只改 hooks 和 CLI',
+        '--non-goals', '不改 Layer 3',
+        '--strategy', '先补 change 阶段命令再回填 ADR',
+        '--risks', '可能破坏旧工作流，需要保留 e2e',
+        '--acceptance', '能记录 clarify 并进入 plan',
+    )
+    assert proc.returncode == 0
+    plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
+    assert '明确改动目标' in plan
+    assert '- **Stage**: plan' in plan
+
+
+def test_change_validate_writes_pre_and_post(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
+    run(
+        repo,
+        'change', 'clarify',
+        '--goal', '明确改动目标',
+        '--scope', '只改 hooks 和 CLI',
+        '--non-goals', '不改 Layer 3',
+        '--strategy', '先补 change 阶段命令再回填 ADR',
+        '--risks', '可能破坏旧工作流，需要保留 e2e',
+        '--acceptance', '能记录 clarify 并进入 plan',
+    )
+    pre = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '修改前运行 pytest 和 e2e')
+    post = run(repo, 'change', 'validate', '--phase', 'post', '--content', '修改后再次运行 pytest 和 e2e')
+    assert pre.returncode == 0
+    assert post.returncode == 0
+    plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
+    assert '修改前运行 pytest 和 e2e' in plan
+    assert '修改后再次运行 pytest 和 e2e' in plan
+
+
+def test_change_close_backfills_adr(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
+    run(
+        repo,
+        'change', 'clarify',
+        '--goal', '明确改动目标',
+        '--scope', '只改 hooks 和 CLI',
+        '--non-goals', '不改 Layer 3',
+        '--strategy', '先补 change 阶段命令再回填 ADR',
+        '--risks', '可能破坏旧工作流，需要保留 e2e',
+        '--acceptance', '能记录 clarify 并进入 plan',
+    )
+    run(repo, 'change', 'validate', '--phase', 'pre', '--content', '修改前通过')
+    run(repo, 'change', 'validate', '--phase', 'post', '--content', '修改后通过')
+    proc = run(repo, 'change', 'close', '--summary', '完成 clarify/validate/回填闭环')
+    assert proc.returncode == 0
+    adr = (repo / 'doc' / 'arch' / 'adr-000.md').read_text()
+    assert '## Implementation Plans' in adr
+    assert '完成 clarify/validate/回填闭环' in adr
+    assert not (repo / 'doc' / 'arch' / 'plans' / '_active.md').exists()
+
+
 def test_change_start_recovers_existing_active(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
@@ -54,9 +118,15 @@ def test_change_start_recovers_existing_active(tmp_path: Path):
     assert 'active ADR: ADR-000' in proc.stdout
 
 
-def test_change_close_clears_active(tmp_path: Path):
+def test_change_should_adr_for_code_paths(tmp_path: Path):
     repo = init_repo(tmp_path)
-    run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
-    proc = run(repo, 'change', 'close')
+    proc = run(repo, 'change', 'should-adr', 'src/main.py')
     assert proc.returncode == 0
-    assert not (repo / 'doc' / 'arch' / 'plans' / '_active.md').exists()
+    assert 'required: True' in proc.stdout
+
+
+def test_change_should_adr_for_docs_only(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    proc = run(repo, 'change', 'should-adr', 'README.md', 'doc/notes.md')
+    assert proc.returncode == 1
+    assert 'required: False' in proc.stdout

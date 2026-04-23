@@ -5,13 +5,21 @@ from pathlib import Path
 import sys
 
 from .adr import list_adrs, next_adr_id, render_adr, validate_title
+from .change import (
+    ClarifyInput,
+    close_change,
+    create_plan,
+    infer_adr_required,
+    load_active,
+    record_validation,
+    clarify_plan,
+)
 from .config import load_config
 from .errors import SpecVCError, UsageError
-from .change import clear_active, create_plan, load_active
-from .skill import load_subsystem_context
 from .gitops import repo_root_from, run_git
 from .hooks import run_commit_msg, run_prepare_commit_msg
 from .index import update_index
+from .skill import load_subsystem_context
 from .status import build_status
 from .templates import template_path
 
@@ -58,8 +66,6 @@ def cmd_adr_status(args: argparse.Namespace) -> int:
     return 1 if report.errors else 0
 
 
-
-
 def cmd_change_start(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
@@ -79,6 +85,40 @@ def cmd_change_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_change_clarify(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
+    plan = clarify_plan(
+        adr_dir,
+        ClarifyInput(
+            goal=args.goal,
+            scope=args.scope,
+            non_goals=args.non_goals,
+            strategy=args.strategy,
+            risks=args.risks,
+            acceptance=args.acceptance,
+        ),
+    )
+    print(plan)
+    return 0
+
+
+def cmd_change_validate(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    plan = record_validation(repo_root / config.project.adr_dir, args.phase, args.content)
+    print(plan)
+    return 0
+
+
+def cmd_change_should_adr(args: argparse.Namespace) -> int:
+    required, reason = infer_adr_required(args.paths or [], args.prompt or "")
+    print(f"required: {required}")
+    print(f"reason: {reason}")
+    return 0 if required else 1
+
+
 def cmd_change_show_active(_args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
@@ -90,15 +130,12 @@ def cmd_change_show_active(_args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_change_close(_args: argparse.Namespace) -> int:
+def cmd_change_close(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
-    adr_dir = repo_root / config.project.adr_dir
-    active = load_active(adr_dir)
-    if active is None:
-        raise UsageError("当前没有 active change")
-    clear_active(adr_dir)
-    print(f"closed ADR-{active.adr_id}")
+    plan, adr = close_change(repo_root / config.project.adr_dir, args.summary)
+    print(plan)
+    print(adr)
     return 0
 
 
@@ -106,14 +143,15 @@ def cmd_skill_load(_args: argparse.Namespace) -> int:
     context = load_subsystem_context(Path.cwd())
     print(f"initialized: {context['initialized']}")
     print(f"dirty: {context['dirty']}")
-    active = context.get('active')
+    active = context.get("active")
     if active is not None:
         print(f"active ADR: ADR-{active.adr_id}")
         print(f"active stage: {active.stage}")
-    recent = context.get('recent_adrs', [])
+    recent = context.get("recent_adrs", [])
     for adr in recent:
         print(f"recent ADR-{adr.adr_id} [{adr.status}] {adr.title}")
     return 0
+
 
 def cmd_hook_commit_msg(args: argparse.Namespace) -> int:
     return run_commit_msg(Path(args.message_file))
@@ -149,10 +187,30 @@ def build_parser() -> argparse.ArgumentParser:
     change_start.add_argument("--summary")
     change_start.set_defaults(func=cmd_change_start)
 
+    change_clarify = change_sub.add_parser("clarify")
+    change_clarify.add_argument("--goal", required=True)
+    change_clarify.add_argument("--scope", required=True)
+    change_clarify.add_argument("--non-goals", required=True)
+    change_clarify.add_argument("--strategy", required=True)
+    change_clarify.add_argument("--risks", required=True)
+    change_clarify.add_argument("--acceptance", required=True)
+    change_clarify.set_defaults(func=cmd_change_clarify)
+
+    change_validate = change_sub.add_parser("validate")
+    change_validate.add_argument("--phase", choices=["pre", "post"], required=True)
+    change_validate.add_argument("--content", required=True)
+    change_validate.set_defaults(func=cmd_change_validate)
+
+    change_should = change_sub.add_parser("should-adr")
+    change_should.add_argument("--prompt")
+    change_should.add_argument("paths", nargs="*")
+    change_should.set_defaults(func=cmd_change_should_adr)
+
     change_show = change_sub.add_parser("show-active")
     change_show.set_defaults(func=cmd_change_show_active)
 
     change_close = change_sub.add_parser("close")
+    change_close.add_argument("--summary", required=True)
     change_close.set_defaults(func=cmd_change_close)
 
     skill = sub.add_parser("skill")
