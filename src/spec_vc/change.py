@@ -7,12 +7,13 @@ import fnmatch
 import re
 
 from .adr import list_adrs, parse_adr
+from .config import AdrRequiredConfig
 from .errors import UsageError, ValidationError
 
 ACTIVE_FILE_NAME = "_active.md"
 PLAN_DIR_NAME = "plans"
 ACTIVE_STAGE_VALUES = {"discover", "clarify", "plan", "implement-ready", "validate", "close"}
-PLAN_STAGE_VALUES = {"clarify", "plan", "implement-ready", "validate", "closed"}
+REQUIRED_CLARIFY_FIELDS = ("goal", "scope", "non_goals", "strategy", "risks", "acceptance")
 
 
 @dataclass(slots=True)
@@ -27,12 +28,12 @@ class ActiveChange:
 
 @dataclass(slots=True)
 class ClarifyInput:
-    goal: str
-    scope: str
-    non_goals: str
-    strategy: str
-    risks: str
-    acceptance: str
+    goal: str = ""
+    scope: str = ""
+    non_goals: str = ""
+    strategy: str = ""
+    risks: str = ""
+    acceptance: str = ""
 
 
 def plans_dir(adr_dir: Path) -> Path:
@@ -149,6 +150,15 @@ def _save_plan(path: Path, text: str) -> None:
     path.write_text(text)
 
 
+def _missing_fields(clar: ClarifyInput) -> list[str]:
+    missing: list[str] = []
+    for field in REQUIRED_CLARIFY_FIELDS:
+        value = getattr(clar, field)
+        if not value.strip():
+            missing.append(field)
+    return missing
+
+
 def create_plan(adr_dir: Path, adr_id: str, summary: str) -> Path:
     adr_path = adr_dir / f"adr-{adr_id}.md"
     if not adr_path.exists():
@@ -170,6 +180,10 @@ def create_plan(adr_dir: Path, adr_id: str, summary: str) -> Path:
             "## Clarification",
             "",
             "待澄清",
+            "",
+            "## Clarification History",
+            "",
+            "待补充",
             "",
             "## Goal",
             "",
@@ -206,6 +220,11 @@ def create_plan(adr_dir: Path, adr_id: str, summary: str) -> Path:
             "## Closure Summary",
             "",
             "待补充",
+            "",
+            "## References",
+            "",
+            "- **Commits**: 待补充",
+            "- **Plan**: 待补充",
             "",
             "## Risks and Rollback",
             "",
@@ -248,14 +267,31 @@ def update_active_stage(adr_dir: Path, stage: str) -> ActiveChange:
     return active
 
 
-def clarify_plan(adr_dir: Path, clar: ClarifyInput) -> Path:
+def clarify_plan(adr_dir: Path, clar: ClarifyInput) -> tuple[Path, list[str]]:
     active = load_active(adr_dir)
     if active is None:
         raise UsageError("当前没有 active change")
     path = plan_path(adr_dir, active)
     text = _load_plan(path)
-    if not all([clar.goal.strip(), clar.scope.strip(), clar.non_goals.strip(), clar.strategy.strip(), clar.risks.strip(), clar.acceptance.strip()]):
-        raise ValidationError("澄清信息不完整，goal/scope/non-goals/strategy/risks/acceptance 必填")
+    missing = _missing_fields(clar)
+    history = "\n".join(
+        [
+            f"- Goal: {clar.goal or '[missing]'}",
+            f"- Scope: {clar.scope or '[missing]'}",
+            f"- Non-Goals: {clar.non_goals or '[missing]'}",
+            f"- Strategy: {clar.strategy or '[missing]'}",
+            f"- Risks: {clar.risks or '[missing]'}",
+            f"- Acceptance: {clar.acceptance or '[missing]'}",
+        ]
+    )
+    text = _replace_section(text, "Clarification History", history)
+    if missing:
+        pending = "待补充字段: " + ", ".join(missing)
+        text = _replace_section(text, "Clarification", pending)
+        text = _replace_meta(text, "Stage", "clarify")
+        _save_plan(path, text)
+        update_active_stage(adr_dir, "clarify")
+        return path, missing
     summary = "\n".join(
         [
             f"- Goal: {clar.goal}",
@@ -276,7 +312,7 @@ def clarify_plan(adr_dir: Path, clar: ClarifyInput) -> Path:
     text = _replace_meta(text, "Stage", "plan")
     _save_plan(path, text)
     update_active_stage(adr_dir, "plan")
-    return path
+    return path, []
 
 
 def record_validation(adr_dir: Path, phase: str, content: str) -> Path:
@@ -298,7 +334,20 @@ def record_validation(adr_dir: Path, phase: str, content: str) -> Path:
     return path
 
 
-def append_adr_summary(adr_dir: Path, active: ActiveChange) -> Path:
+def _commit_refs_from_git(repo_root: Path, adr_id: str) -> list[str]:
+    import subprocess
+    proc = subprocess.run(["git", "log", "--format=%h %s"], cwd=repo_root, text=True, capture_output=True)
+    if proc.returncode != 0:
+        return []
+    needle = f"[ADR-{adr_id}]"
+    refs = []
+    for line in proc.stdout.splitlines():
+        if needle in line:
+            refs.append(line.strip())
+    return refs[:10]
+
+
+def append_adr_summary(repo_root: Path, adr_dir: Path, active: ActiveChange) -> Path:
     adr_path = adr_dir / f"adr-{active.adr_id}.md"
     adr_text = adr_path.read_text()
     plan = plan_path(adr_dir, active)
@@ -309,6 +358,8 @@ def append_adr_summary(adr_dir: Path, active: ActiveChange) -> Path:
     summary = (close_match.group(1).strip() if close_match else "待补充").strip()
     pre = (pre_match.group(1).strip() if pre_match else "待补充").strip()
     post = (post_match.group(1).strip() if post_match else "待补充").strip()
+    commits = _commit_refs_from_git(repo_root, active.adr_id)
+    commits_line = "; ".join(commits) if commits else "待补充"
     block = "\n".join(
         [
             "## Implementation Plans",
@@ -327,11 +378,12 @@ def append_adr_summary(adr_dir: Path, active: ActiveChange) -> Path:
             adr_text = adr_text.replace("## References", block + "## References", 1)
         else:
             adr_text = adr_text.rstrip() + "\n\n" + block
+    adr_text = re.sub(r"(- \*\*Commits\*\*: ).*$", rf"\1{commits_line}", adr_text, flags=re.M)
     adr_path.write_text(adr_text)
     return adr_path
 
 
-def close_change(adr_dir: Path, summary: str) -> tuple[Path, Path]:
+def close_change(repo_root: Path, adr_dir: Path, summary: str) -> tuple[Path, Path]:
     active = load_active(adr_dir)
     if active is None:
         raise UsageError("当前没有 active change")
@@ -340,28 +392,26 @@ def close_change(adr_dir: Path, summary: str) -> tuple[Path, Path]:
     if not summary.strip():
         raise ValidationError("close summary 不能为空")
     text = _replace_section(text, "Closure Summary", summary)
+    text = _replace_section(text, "References", f"- **Commits**: 待从 git 自动采集\n- **Plan**: {plan.relative_to(adr_dir.parent.parent)}")
     text = _replace_meta(text, "Stage", "closed")
     _save_plan(plan, text)
     active.stage = "close"
     active.updated_at = datetime.now().isoformat(timespec="seconds")
-    adr_path = append_adr_summary(adr_dir, active)
+    adr_path = append_adr_summary(repo_root, adr_dir, active)
     clear_active(adr_dir)
     return plan, adr_path
 
 
-def infer_adr_required(paths: list[str], prompt: str = "") -> tuple[bool, str]:
+def infer_adr_required(paths: list[str], prompt: str, config: AdrRequiredConfig) -> tuple[bool, str]:
     prompt_l = prompt.lower()
-    path_patterns_force = ["src/**", "lib/**", "core/**", "api/**", "server/**", "backend/**", "frontend/**"]
-    keywords = ["架构", "接口", "行为", "状态机", "breaking", "api", "contract", "跨模块", "跨服务", "invariant"]
-    doc_only_exts = (".md", ".txt", ".rst")
-    if any(any(fnmatch.fnmatch(p, pat) for pat in path_patterns_force) for p in paths):
+    if any(any(fnmatch.fnmatch(p, pat) for pat in config.code_paths) for p in paths):
         return True, "命中代码/接口路径"
-    if any(key in prompt_l for key in keywords):
+    if any(keyword.lower() in prompt_l for keyword in config.keywords):
         return True, "命中需要 ADR 的语义关键词"
-    if paths and all(p.endswith(doc_only_exts) or p.startswith("doc/") or p.startswith("docs/") for p in paths):
+    if paths and all(any(fnmatch.fnmatch(p, pat) for pat in config.doc_only_paths) or any(p.endswith(ext) for ext in config.doc_only_extensions) for p in paths):
         return False, "仅命中文档路径"
-    if not paths and any(key in prompt_l for key in ["refactor", "redesign", "protocol", "schema"]):
-        return True, "根据需求语义保守判断需要 ADR"
+    if config.default_conservative and (paths or prompt.strip()):
+        return True, "按保守策略需要 ADR"
     return False, "未命中 ADR-required 规则"
 
 

@@ -35,6 +35,15 @@ def test_skill_load_reports_context(tmp_path: Path):
     assert 'recent ADR-000' in proc.stdout
 
 
+def test_skill_load_auto_routes_adr_required(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    (repo / 'src').mkdir()
+    (repo / 'src' / 'main.py').write_text('print(1)\n')
+    proc = run(repo, 'skill', 'load', '--user-prompt', '我要重构状态机')
+    assert proc.returncode == 0
+    assert 'adr_required: True' in proc.stdout
+
+
 def test_change_start_creates_plan_and_active(tmp_path: Path):
     repo = init_repo(tmp_path)
     proc = run(repo, 'change', 'start', '--adr', 'ADR-000', '--summary', '准备实施 LDAP 细则')
@@ -46,7 +55,18 @@ def test_change_start_creates_plan_and_active(tmp_path: Path):
     assert active.exists()
 
 
-def test_change_clarify_updates_plan(tmp_path: Path):
+def test_change_clarify_reports_missing_fields(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
+    proc = run(repo, 'change', 'clarify', '--goal', '明确改动目标')
+    assert proc.returncode == 1
+    assert 'missing:' in proc.stdout
+    plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
+    assert '待补充字段' in plan
+    assert '- **Stage**: clarify' in plan
+
+
+def test_change_clarify_updates_plan_when_complete(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
     proc = run(
@@ -62,6 +82,7 @@ def test_change_clarify_updates_plan(tmp_path: Path):
     assert proc.returncode == 0
     plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
     assert '明确改动目标' in plan
+    assert 'Clarification History' in plan
     assert '- **Stage**: plan' in plan
 
 
@@ -87,7 +108,7 @@ def test_change_validate_writes_pre_and_post(tmp_path: Path):
     assert '修改后再次运行 pytest 和 e2e' in plan
 
 
-def test_change_close_backfills_adr(tmp_path: Path):
+def test_change_close_backfills_adr_and_refs(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
     run(
@@ -105,8 +126,12 @@ def test_change_close_backfills_adr(tmp_path: Path):
     proc = run(repo, 'change', 'close', '--summary', '完成 clarify/validate/回填闭环')
     assert proc.returncode == 0
     adr = (repo / 'doc' / 'arch' / 'adr-000.md').read_text()
+    plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
     assert '## Implementation Plans' in adr
     assert '完成 clarify/validate/回填闭环' in adr
+    assert '- **Plan**: doc/arch/plans/ADR-000-plan-001.md' in adr
+    assert '- **Commits**:' in adr
+    assert '- **Plan**: doc/arch/plans/ADR-000-plan-001.md' in plan
     assert not (repo / 'doc' / 'arch' / 'plans' / '_active.md').exists()
 
 

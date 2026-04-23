@@ -70,7 +70,7 @@ def cmd_change_start(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
     adr_dir = repo_root / config.project.adr_dir
-    context = load_subsystem_context(Path.cwd())
+    context = load_subsystem_context(Path.cwd(), user_prompt=args.summary or "")
     active = context.get("active")
     if active is not None:
         print(f"active ADR: ADR-{active.adr_id}")
@@ -89,18 +89,21 @@ def cmd_change_clarify(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
     adr_dir = repo_root / config.project.adr_dir
-    plan = clarify_plan(
+    plan, missing = clarify_plan(
         adr_dir,
         ClarifyInput(
-            goal=args.goal,
-            scope=args.scope,
-            non_goals=args.non_goals,
-            strategy=args.strategy,
-            risks=args.risks,
-            acceptance=args.acceptance,
+            goal=args.goal or "",
+            scope=args.scope or "",
+            non_goals=args.non_goals or "",
+            strategy=args.strategy or "",
+            risks=args.risks or "",
+            acceptance=args.acceptance or "",
         ),
     )
     print(plan)
+    if missing:
+        print("missing: " + ", ".join(missing))
+        return 1
     return 0
 
 
@@ -113,7 +116,9 @@ def cmd_change_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_change_should_adr(args: argparse.Namespace) -> int:
-    required, reason = infer_adr_required(args.paths or [], args.prompt or "")
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    required, reason = infer_adr_required(args.paths or [], args.prompt or "", config.adr_required)
     print(f"required: {required}")
     print(f"reason: {reason}")
     return 0 if required else 1
@@ -133,16 +138,19 @@ def cmd_change_show_active(_args: argparse.Namespace) -> int:
 def cmd_change_close(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
-    plan, adr = close_change(repo_root / config.project.adr_dir, args.summary)
+    plan, adr = close_change(repo_root, repo_root / config.project.adr_dir, args.summary)
     print(plan)
     print(adr)
     return 0
 
 
-def cmd_skill_load(_args: argparse.Namespace) -> int:
-    context = load_subsystem_context(Path.cwd())
+def cmd_skill_load(args: argparse.Namespace) -> int:
+    context = load_subsystem_context(Path.cwd(), user_prompt=args.user_prompt or "")
     print(f"initialized: {context['initialized']}")
     print(f"dirty: {context['dirty']}")
+    if 'adr_required' in context:
+        print(f"adr_required: {context['adr_required']}")
+        print(f"adr_required_reason: {context['adr_required_reason']}")
     active = context.get("active")
     if active is not None:
         print(f"active ADR: ADR-{active.adr_id}")
@@ -188,12 +196,12 @@ def build_parser() -> argparse.ArgumentParser:
     change_start.set_defaults(func=cmd_change_start)
 
     change_clarify = change_sub.add_parser("clarify")
-    change_clarify.add_argument("--goal", required=True)
-    change_clarify.add_argument("--scope", required=True)
-    change_clarify.add_argument("--non-goals", required=True)
-    change_clarify.add_argument("--strategy", required=True)
-    change_clarify.add_argument("--risks", required=True)
-    change_clarify.add_argument("--acceptance", required=True)
+    change_clarify.add_argument("--goal")
+    change_clarify.add_argument("--scope")
+    change_clarify.add_argument("--non-goals")
+    change_clarify.add_argument("--strategy")
+    change_clarify.add_argument("--risks")
+    change_clarify.add_argument("--acceptance")
     change_clarify.set_defaults(func=cmd_change_clarify)
 
     change_validate = change_sub.add_parser("validate")
@@ -216,6 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
     skill = sub.add_parser("skill")
     skill_sub = skill.add_subparsers(dest="skill_command")
     skill_load = skill_sub.add_parser("load")
+    skill_load.add_argument("--user-prompt")
     skill_load.set_defaults(func=cmd_skill_load)
 
     hook = sub.add_parser("hook")
