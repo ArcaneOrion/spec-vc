@@ -1,0 +1,14 @@
+[project]
+name = "spec-vc"
+version = "0.2.0"
+description = "Decision Version Control via ADR + Commit anchoring"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+spec-vc = "spec_vc.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
