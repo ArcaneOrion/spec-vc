@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from pathlib import Path
 import sys
 
@@ -22,11 +23,63 @@ from .hooks import run_commit_msg, run_prepare_commit_msg
 from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
-from .templates import template_path
+from .templates import skill_root, template_path
 
 
 def _repo_root() -> Path:
     return repo_root_from(Path.cwd())
+
+
+def _write_if_missing(path: Path, content: str) -> None:
+    if not path.exists():
+        path.write_text(content)
+
+
+def _install_hook(repo_root: Path, name: str) -> Path:
+    hook_path = repo_root / ".git" / "hooks" / name
+    hook_path.write_text((skill_root() / "hooks" / name).read_text())
+    hook_path.chmod(0o755)
+    return hook_path
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    return cmd_adr_init(args)
+
+
+def cmd_adr_init(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config_path = repo_root / ".spec-vc.toml"
+    _write_if_missing(config_path, (skill_root() / ".spec-vc.toml").read_text())
+    config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
+    adr_dir.mkdir(parents=True, exist_ok=True)
+
+    readme_path = adr_dir / "README.md"
+    _write_if_missing(readme_path, template_path("index.md").read_text())
+
+    seed_path = adr_dir / "adr-000.md"
+    if args.seed and not seed_path.exists():
+        author = run_git(repo_root, "config", "user.name", check=False).strip() or "unknown"
+        content = template_path("seed-adr-000.md").read_text()
+        content = content.replace("{{DATE}}", date.today().isoformat())
+        content = content.replace("{{AUTHOR}}", author)
+        seed_path.write_text(content)
+
+    update_index(adr_dir)
+
+    prepare_hook = _install_hook(repo_root, "prepare-commit-msg")
+    commit_hook = _install_hook(repo_root, "commit-msg")
+    run_git(repo_root, "config", "commit.template", str(template_path("commit-msg")))
+
+    print("✅ spec-vc 初始化成功")
+    print(f"  - {config_path.relative_to(repo_root)}")
+    print(f"  - {readme_path.relative_to(repo_root)}")
+    if args.seed and seed_path.exists():
+        print(f"  - {seed_path.relative_to(repo_root)}")
+    print(f"  - {prepare_hook.relative_to(repo_root)}")
+    print(f"  - {commit_hook.relative_to(repo_root)}")
+    print("  - git config commit.template (已配置)")
+    return 0
 
 
 def cmd_adr_list(_args: argparse.Namespace) -> int:
@@ -186,8 +239,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spec-vc")
     sub = parser.add_subparsers(dest="command")
 
+    init = sub.add_parser("init")
+    init.add_argument("--seed", action=argparse.BooleanOptionalAction, default=True)
+    init.set_defaults(func=cmd_init)
+
     adr = sub.add_parser("adr")
     adr_sub = adr.add_subparsers(dest="adr_command")
+
+    adr_init = adr_sub.add_parser("init")
+    adr_init.add_argument("--seed", action=argparse.BooleanOptionalAction, default=True)
+    adr_init.set_defaults(func=cmd_adr_init)
 
     adr_list = adr_sub.add_parser("list")
     adr_list.set_defaults(func=cmd_adr_list)

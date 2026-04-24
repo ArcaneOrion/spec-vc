@@ -35,6 +35,53 @@ def init_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def init_empty_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+    return repo
+
+
+def test_init_bootstraps_repo(tmp_path: Path):
+    repo = init_empty_repo(tmp_path)
+    proc = run(repo, "init", check=True)
+    assert "spec-vc 初始化成功" in proc.stdout
+    assert (repo / ".spec-vc.toml").exists()
+    assert (repo / "doc" / "arch" / "README.md").exists()
+    assert (repo / "doc" / "arch" / "adr-000.md").exists()
+    assert (repo / ".git" / "hooks" / "commit-msg").exists()
+    assert (repo / ".git" / "hooks" / "prepare-commit-msg").exists()
+    assert (repo / ".git" / "hooks" / "commit-msg").stat().st_mode & 0o111
+    commit_template = subprocess.run(["git", "config", "commit.template"], cwd=repo, text=True, capture_output=True, check=True)
+    assert commit_template.stdout.strip().endswith("templates/commit-msg")
+
+
+
+def test_adr_init_supports_no_seed(tmp_path: Path):
+    repo = init_empty_repo(tmp_path)
+    proc = run(repo, "adr", "init", "--no-seed", check=True)
+    assert "spec-vc 初始化成功" in proc.stdout
+    assert (repo / ".spec-vc.toml").exists()
+    assert (repo / "doc" / "arch" / "README.md").exists()
+    assert not (repo / "doc" / "arch" / "adr-000.md").exists()
+    next_proc = run(repo, "adr", "new", "新的决策", check=True)
+    assert "adr-000.md" in next_proc.stdout
+    assert (repo / "doc" / "arch" / "adr-000.md").exists()
+
+
+
+def test_init_fails_outside_git_repo(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    proc = run(repo, "init")
+    assert proc.returncode != 0
+    assert "当前目录不在 git 仓库内" in proc.stderr
+    assert not (repo / ".spec-vc.toml").exists()
+
+
+
 def test_adr_new_updates_index(tmp_path: Path):
     repo = init_repo(tmp_path)
     proc = run(repo, "adr", "new", "新的决策", check=True)
