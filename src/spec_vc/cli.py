@@ -11,6 +11,7 @@ from .change import (
     create_plan,
     infer_adr_required,
     load_active,
+    next_question,
     record_validation,
     clarify_plan,
 )
@@ -124,6 +125,18 @@ def cmd_change_should_adr(args: argparse.Namespace) -> int:
     return 0 if required else 1
 
 
+def cmd_change_next_question(_args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    question = next_question(repo_root / config.project.adr_dir)
+    print(f"stage: {question.stage}")
+    print("missing: " + ", ".join(question.missing_fields))
+    if question.next_field is not None:
+        print(f"next_field: {question.next_field}")
+        print(f"next_prompt: {question.next_prompt}")
+    return 0
+
+
 def cmd_change_show_active(_args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
@@ -213,6 +226,9 @@ def build_parser() -> argparse.ArgumentParser:
     change_should.add_argument("--prompt")
     change_should.add_argument("paths", nargs="*")
     change_should.set_defaults(func=cmd_change_should_adr)
+
+    change_next = change_sub.add_parser("next-question")
+    change_next.set_defaults(func=cmd_change_next_question)
 
     change_show = change_sub.add_parser("show-active")
     change_show.set_defaults(func=cmd_change_show_active)

@@ -13,7 +13,23 @@ from .errors import UsageError, ValidationError
 ACTIVE_FILE_NAME = "_active.md"
 PLAN_DIR_NAME = "plans"
 ACTIVE_STAGE_VALUES = {"discover", "clarify", "plan", "implement-ready", "validate", "close"}
-REQUIRED_CLARIFY_FIELDS = ("goal", "scope", "non_goals", "strategy", "risks", "acceptance")
+FIELD_LABELS = {
+    "goal": "目标",
+    "scope": "范围",
+    "non_goals": "非目标",
+    "strategy": "实现策略",
+    "risks": "风险与回滚",
+    "acceptance": "验收标准",
+}
+SECTION_BY_FIELD = {
+    "goal": "Goal",
+    "scope": "Scope",
+    "non_goals": "Non-Goals",
+    "strategy": "Implementation Strategy",
+    "risks": "Risks and Rollback",
+    "acceptance": "Acceptance Criteria",
+}
+REQUIRED_CLARIFY_FIELDS = tuple(FIELD_LABELS.keys())
 
 
 @dataclass(slots=True)
@@ -34,6 +50,14 @@ class ClarifyInput:
     strategy: str = ""
     risks: str = ""
     acceptance: str = ""
+
+
+@dataclass(slots=True)
+class NextQuestion:
+    stage: str
+    missing_fields: list[str]
+    next_field: str | None
+    next_prompt: str | None
 
 
 def plans_dir(adr_dir: Path) -> Path:
@@ -140,6 +164,14 @@ def _replace_meta(text: str, key: str, value: str) -> str:
     return pattern.sub(f"- **{key}**: {value}", text, count=1)
 
 
+def _read_section(text: str, section: str) -> str:
+    pattern = re.compile(rf"## {re.escape(section)}\n\n(.*?)(?=\n## |\Z)", re.S)
+    match = pattern.search(text)
+    if not match:
+        raise ValidationError(f"计划文件缺少区块: {section}")
+    return match.group(1).strip()
+
+
 def _load_plan(path: Path) -> str:
     if not path.exists():
         raise UsageError(f"计划文件不存在: {path}")
@@ -150,13 +182,22 @@ def _save_plan(path: Path, text: str) -> None:
     path.write_text(text)
 
 
-def _missing_fields(clar: ClarifyInput) -> list[str]:
+def next_question(adr_dir: Path) -> NextQuestion:
+    active = load_active(adr_dir)
+    if active is None:
+        raise UsageError("当前没有 active change")
+    path = plan_path(adr_dir, active)
+    text = _load_plan(path)
     missing: list[str] = []
     for field in REQUIRED_CLARIFY_FIELDS:
-        value = getattr(clar, field)
-        if not value.strip():
+        value = _read_section(text, SECTION_BY_FIELD[field])
+        if value in {"待补充", "待澄清", "", "待补充字段"} or value.startswith("待补充字段"):
             missing.append(field)
-    return missing
+    next_field = missing[0] if missing else None
+    next_prompt = None
+    if next_field is not None:
+        next_prompt = f"请先明确本次变更的{FIELD_LABELS[next_field]}。"
+    return NextQuestion(stage=active.stage, missing_fields=missing, next_field=next_field, next_prompt=next_prompt)
 
 
 def create_plan(adr_dir: Path, adr_id: str, summary: str) -> Path:
@@ -273,7 +314,6 @@ def clarify_plan(adr_dir: Path, clar: ClarifyInput) -> tuple[Path, list[str]]:
         raise UsageError("当前没有 active change")
     path = plan_path(adr_dir, active)
     text = _load_plan(path)
-    missing = _missing_fields(clar)
     history = "\n".join(
         [
             f"- Goal: {clar.goal or '[missing]'}",
@@ -285,30 +325,22 @@ def clarify_plan(adr_dir: Path, clar: ClarifyInput) -> tuple[Path, list[str]]:
         ]
     )
     text = _replace_section(text, "Clarification History", history)
-    if missing:
-        pending = "待补充字段: " + ", ".join(missing)
-        text = _replace_section(text, "Clarification", pending)
+    for field in REQUIRED_CLARIFY_FIELDS:
+        value = getattr(clar, field)
+        if value.strip():
+            text = _replace_section(text, SECTION_BY_FIELD[field], value)
+    _save_plan(path, text)
+    question = next_question(adr_dir)
+    if question.missing_fields:
+        text = _load_plan(path)
+        text = _replace_section(text, "Clarification", "待补充字段: " + ", ".join(question.missing_fields))
         text = _replace_meta(text, "Stage", "clarify")
         _save_plan(path, text)
         update_active_stage(adr_dir, "clarify")
-        return path, missing
-    summary = "\n".join(
-        [
-            f"- Goal: {clar.goal}",
-            f"- Scope: {clar.scope}",
-            f"- Non-Goals: {clar.non_goals}",
-            f"- Strategy: {clar.strategy}",
-            f"- Risks: {clar.risks}",
-            f"- Acceptance: {clar.acceptance}",
-        ]
-    )
+        return path, question.missing_fields
+    text = _load_plan(path)
+    summary = "\n".join([f"- {FIELD_LABELS[field]}: {_read_section(text, SECTION_BY_FIELD[field])}" for field in REQUIRED_CLARIFY_FIELDS])
     text = _replace_section(text, "Clarification", summary)
-    text = _replace_section(text, "Goal", clar.goal)
-    text = _replace_section(text, "Scope", clar.scope)
-    text = _replace_section(text, "Non-Goals", clar.non_goals)
-    text = _replace_section(text, "Implementation Strategy", clar.strategy)
-    text = _replace_section(text, "Acceptance Criteria", clar.acceptance)
-    text = _replace_section(text, "Risks and Rollback", clar.risks)
     text = _replace_meta(text, "Stage", "plan")
     _save_plan(path, text)
     update_active_stage(adr_dir, "plan")
@@ -327,10 +359,10 @@ def record_validation(adr_dir: Path, phase: str, content: str) -> Path:
     text = _load_plan(path)
     section = "Pre-Change Validation" if phase == "pre" else "Post-Change Validation"
     text = _replace_section(text, section, content)
-    next_stage = "implement-ready" if phase == "pre" else "validate"
-    text = _replace_meta(text, "Stage", next_stage)
+    next_stage_value = "implement-ready" if phase == "pre" else "validate"
+    text = _replace_meta(text, "Stage", next_stage_value)
     _save_plan(path, text)
-    update_active_stage(adr_dir, next_stage)
+    update_active_stage(adr_dir, next_stage_value)
     return path
 
 
@@ -393,7 +425,7 @@ def close_change(repo_root: Path, adr_dir: Path, summary: str) -> tuple[Path, Pa
         raise ValidationError("close summary 不能为空")
     text = _replace_section(text, "Closure Summary", summary)
     text = _replace_section(text, "References", f"- **Commits**: 待从 git 自动采集\n- **Plan**: {plan.relative_to(adr_dir.parent.parent)}")
-    text = _replace_meta(text, "Stage", "closed")
+    text = _replace_meta(text, "Stage", "close")
     _save_plan(plan, text)
     active.stage = "close"
     active.updated_at = datetime.now().isoformat(timespec="seconds")
