@@ -9,7 +9,7 @@ import tomllib
 @dataclass(slots=True)
 class ExemptionConfig:
     enabled: bool = True
-    allowed_paths: list[str] = field(default_factory=lambda: ["README.md", "docs/**", ".github/**"])
+    allowed_paths: list[str] = field(default_factory=lambda: ["README.md", "docs/**", "doc/**", ".github/**"])
     blocked_paths: list[str] = field(default_factory=lambda: ["src/**", "lib/**", "core/**"])
     allowed_extensions: list[str] = field(default_factory=lambda: [".md", ".txt", ".rst", ".gitignore"])
     max_changed_lines: int = 40

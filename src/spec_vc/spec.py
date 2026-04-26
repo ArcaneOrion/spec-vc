@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 from datetime import date
 
+from ._sections import extract_section, validate_title
 from .errors import ValidationError
 
 
@@ -24,15 +25,6 @@ ADR_REF_RE = re.compile(
     r"^-\s*\*\*ADR\*\*:\s*(?P<adr_ref>.+?)\s*$",
     re.MULTILINE,
 )
-
-FORMAL_FILE_PATTERNS: list[tuple[str, str]] = [
-    ("*.openapi.yaml", "openapi"),
-    ("*contract*.yaml", "openapi"),
-    ("*.openapi.yml", "openapi"),
-    ("*.schema.json", "jsonschema"),
-    ("*.feature", "gherkin"),
-]
-
 
 @dataclass(slots=True)
 class Spec:
@@ -66,16 +58,6 @@ def dev_doc_path(specs_root: Path, spec_id: str) -> Path:
     return spec_basedir(specs_root, spec_id) / "dev-doc.md"
 
 
-def _extract_section(text: str, section_name: str) -> str:
-    pattern = re.compile(
-        rf"## {re.escape(section_name)}\s*\n\n(.*?)(?=\n## |\Z)",
-        re.S,
-    )
-    match = pattern.search(text)
-    if not match:
-        return ""
-    return match.group(1).strip()
-
 
 def parse_spec(path: Path) -> Spec:
     text = path.read_text()
@@ -96,12 +78,12 @@ def parse_spec(path: Path) -> Spec:
         author="",
         spec_date=date_match.group("date").strip() if date_match else None,
         path=path,
-        overview=_extract_section(text, "概述"),
-        interface_contract=_extract_section(text, "接口契约"),
-        data_shape=_extract_section(text, "数据形状"),
-        behavior_rules=_extract_section(text, "行为规则"),
-        non_goals=_extract_section(text, "非目标"),
-        references=_extract_section(text, "References"),
+        overview=extract_section(text, "概述"),
+        interface_contract=extract_section(text, "接口契约"),
+        data_shape=extract_section(text, "数据形状"),
+        behavior_rules=extract_section(text, "行为规则"),
+        non_goals=extract_section(text, "非目标"),
+        references=extract_section(text, "References"),
     )
 
 

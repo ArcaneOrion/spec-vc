@@ -6,6 +6,7 @@ from datetime import datetime
 import fnmatch
 import re
 
+from ._sections import extract_section as _read_section, replace_section as _replace_section
 from .adr import list_adrs, parse_adr
 from .config import AdrRequiredConfig
 from .errors import UsageError, ValidationError
@@ -145,14 +146,6 @@ def next_plan_id(adr_dir: Path, adr_id: str) -> str:
 
 def plan_path(adr_dir: Path, active: ActiveChange) -> Path:
     return adr_dir.parent.parent / active.plan_path
-
-
-def _replace_section(text: str, section: str, body: str) -> str:
-    pattern = re.compile(rf"(## {re.escape(section)}\n\n)(.*?)(?=\n## |\Z)", re.S)
-    replacement = rf"\1{body.strip()}\n\n"
-    if not pattern.search(text):
-        raise ValidationError(f"计划文件缺少区块: {section}")
-    return pattern.sub(replacement, text, count=1)
 
 
 def _replace_meta(text: str, key: str, value: str) -> str:

@@ -8,9 +8,9 @@
 |---|---|---|---|---|---|
 | Layer 1 · Git | descriptive | 做了什么 | 源文件 diff | (git 原生,不由本 skill 提供) | ✅ 基础设施 |
 | Layer 2 · 决策版本控制(ADR) | rationale | 为什么这么选 | Markdown | `/spec-vc adr-*` | 🟢 **v0.1 可用** |
-| Layer 3 · 规格版本控制(可审计) | normative | 应该做什么 | OpenAPI / Protobuf / Gherkin → Lean 4 / TLA+ | `/spec-vc spec-*` | 🟠 **设计开发中** |
+| Layer 3 · 规格版本控制(可审计) | normative | 应该做什么 | OpenAPI / JSON Schema / Gherkin | `/spec-vc spec-*` | 🟢 **v0.2 可用** |
 
-**当前仓库只开发到 Layer 2(决策版本控制)**。Layer 3(规格版本控制 / 可审计版本控制)仍在设计开发中,预计随 v0.3 释出。三层并非独立 skill——都在同一个 `spec-vc` skill 内,用子命令前缀区分层。
+Layer 3 已实现:结构化开发文档(dev-doc.md) + 形式化文件(.yaml/.json/.feature) + 双 subagent 验证协议(spec-vc commit)。三层并非独立 skill——都在同一个 `spec-vc` skill 内,用子命令前缀区分层。
 
 ## 为什么需要它
 
@@ -49,9 +49,13 @@ spec-vc/                       ← 本仓库即 skill
 │   └── (未来:spec-init.md / spec-new.md / spec-validate.md / ...)
 ├── templates/
 │   ├── adr.md                 ← Nygard 五段式
+│   ├── dev-doc.md             ← 结构化开发文档
 │   ├── index.md               ← ADR 索引模板
 │   ├── commit-msg             ← git commit message 模板
-│   └── seed-adr-000.md        ← init 时的种子 ADR(固定内容)
+│   ├── seed-adr-000.md        ← init 时的种子 ADR(固定内容)
+│   ├── contract.openapi.yaml  ← OpenAPI 骨架
+│   ├── schema.json            ← JSON Schema 骨架
+│   └── behavior.feature       ← Gherkin 骨架
 ├── hooks/
 │   ├── prepare-commit-msg     ← 起草时注入 [ADR-???] 槽位
 │   └── commit-msg             ← 严格校验 ADR 引用存在 + 状态有效
@@ -157,11 +161,11 @@ docs: 修正 README 拼写 [ADR-none]
 
 ## 路线图
 
-- **v0.1(当前)**:`adr-*` 子命令族——ADR + Commit 锚定闭环 🟢
-- **v0.2**:在 Alice 项目做首次实战,迭代严格度参数、打磨 `check_exemption` 规则
-- **v0.3**:**引入 `spec-*` 子命令族**——弱形式化(OpenAPI/Protobuf/JSON Schema/Gherkin),对应 Layer 3
-- **v0.4**:三层锚定——ADR 引用 Spec 版本,Spec 引用 Code 契约;三层引用漂移检测
-- **v1.0**:强形式化预留位——Lean 4 / TLA+ 规格的创建和验证
+- **v0.1**:`adr-*` 子命令族——ADR + Commit 锚定闭环 🟢
+- **v0.2(当前)**:`spec-*` 子命令族——结构化开发文档 + 形式化文件 + 双 subagent 验证协议 🟢
+- **v0.3**:Alice 项目首次实战,迭代严格度参数、打磨 subagent 审计协议、三层锚定漂移检测
+- **v0.4**:强形式化预留位——spectral / ajv / Cucumber 机械验证器集成
+- **v1.0**:Lean 4 / TLA+ 规格的创建和验证
 
 ## 思想基础
 

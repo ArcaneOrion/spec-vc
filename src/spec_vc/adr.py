@@ -7,6 +7,7 @@ import re
 from datetime import date
 
 from .config import Config
+from ._sections import validate_title
 from .errors import ValidationError
 
 
@@ -72,13 +73,6 @@ def next_adr_id(adr_dir: Path) -> str:
         max_id = max(max_id, int(match.group(1)))
     return f"{max_id + 1:03d}"
 
-
-def validate_title(title: str) -> str:
-    if not title.strip():
-        raise ValidationError("ADR 标题不能为空")
-    if "\n" in title or "\r" in title:
-        raise ValidationError("ADR 标题不能包含换行")
-    return title.strip()
 
 
 def render_adr(template: str, adr_id: str, title: str, author: str) -> str:

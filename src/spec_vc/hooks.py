@@ -19,7 +19,8 @@ HELP_SLOT = """[spec-vc] Commit 被阻塞:检测到未填充的槽位 [ADR-???]"
 
 
 def _subject(message_file: Path) -> str:
-    return message_file.read_text().splitlines()[0].rstrip("\n") if message_file.read_text().splitlines() else ""
+    lines = message_file.read_text().splitlines()
+    return lines[0].rstrip("\n") if lines else ""
 
 
 def _extract_exact_tokens(subject: str) -> list[str]:

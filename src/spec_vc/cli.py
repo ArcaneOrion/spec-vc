@@ -5,7 +5,8 @@ from datetime import date
 from pathlib import Path
 import sys
 
-from .adr import list_adrs, next_adr_id, render_adr, validate_title
+from ._sections import validate_title
+from .adr import list_adrs, next_adr_id, render_adr
 from .adr import parse_adr as parse_adr_file
 from .adr import ensure_referenceable as ensure_adr_referenceable
 from .change import (
@@ -57,10 +58,6 @@ def _install_hook(repo_root: Path, name: str) -> Path:
     hook_path.write_text((skill_root() / "hooks" / name).read_text())
     hook_path.chmod(0o755)
     return hook_path
-
-
-def cmd_init(args: argparse.Namespace) -> int:
-    return cmd_adr_init(args)
 
 
 def _run_uv_sync(project_root: Path) -> None:
@@ -406,7 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = sub.add_parser("init")
     init.add_argument("--seed", action=argparse.BooleanOptionalAction, default=True)
-    init.set_defaults(func=cmd_init)
+    init.set_defaults(func=cmd_adr_init)
 
     adr = sub.add_parser("adr")
     adr_sub = adr.add_subparsers(dest="adr_command")
@@ -485,8 +482,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     commit = sub.add_parser("commit")
     commit_sub = commit.add_subparsers(dest="subcommand")
-    commit_run = commit_sub.add_parser("run")
-    commit_run.set_defaults(func=cmd_commit)
     commit_clean = commit_sub.add_parser("clean")
     commit_clean.set_defaults(func=cmd_commit)
     commit.set_defaults(func=cmd_commit)
