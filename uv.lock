@@ -5,4 +5,4 @@ requires-python = ">=3.11"
 [[package]]
 name = "spec-vc"
 version = "0.2.0"
-source = { virtual = "." }
+source = { editable = "." }

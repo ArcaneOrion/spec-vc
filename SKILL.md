@@ -51,7 +51,7 @@ disable-model-invocation: true
 
 如果当前 stage 是 `clarify`，不要让用户手写完整命令参数。你要：
 
-1. 运行 `spec-vc change next-question`
+1. 运行 `uv run spec-vc change next-question`
 2. 读取返回的：
    - `missing`
    - `next_field`

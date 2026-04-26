@@ -27,6 +27,7 @@
 | ADR-001 | 严格模式 + [ADR-none] 豁免策略 | Accepted | 2026-04-20 |
 | ADR-002 | hooks 安装使用 cp 而非 symlink | Accepted | 2026-04-20 |
 | ADR-003 | skill 扁平化 + 命令前缀统一为 /spec-vc adr-* | Accepted | 2026-04-20 |
+| ADR-004 | init命令增加uv环境安装步骤 | Proposed | 2026-04-26 |
 
 ## 状态图例
 

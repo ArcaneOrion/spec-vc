@@ -9,6 +9,10 @@ dependencies = []
 [project.scripts]
 spec-vc = "spec_vc.cli:main"
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

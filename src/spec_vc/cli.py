@@ -46,10 +46,28 @@ def cmd_init(args: argparse.Namespace) -> int:
     return cmd_adr_init(args)
 
 
+def _run_uv_sync(project_root: Path) -> None:
+    import subprocess
+
+    proc = subprocess.run(
+        ["uv", "sync"],
+        cwd=project_root,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        msg = proc.stderr.strip() or proc.stdout.strip() or "uv sync 失败"
+        raise UsageError(f"环境安装失败: {msg}")
+
+
 def cmd_adr_init(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
+    project_root = skill_root()
+
+    _run_uv_sync(project_root)
+
     config_path = repo_root / ".spec-vc.toml"
-    _write_if_missing(config_path, (skill_root() / ".spec-vc.toml").read_text())
+    _write_if_missing(config_path, (project_root / ".spec-vc.toml").read_text())
     config = load_config(repo_root)
     adr_dir = repo_root / config.project.adr_dir
     adr_dir.mkdir(parents=True, exist_ok=True)
@@ -71,7 +89,9 @@ def cmd_adr_init(args: argparse.Namespace) -> int:
     commit_hook = _install_hook(repo_root, "commit-msg")
     run_git(repo_root, "config", "commit.template", str(template_path("commit-msg")))
 
+    venv_path = project_root / ".venv"
     print("✅ spec-vc 初始化成功")
+    print("  - uv sync (环境已安装)" if venv_path.exists() else "  - uv sync (已完成)")
     print(f"  - {config_path.relative_to(repo_root)}")
     print(f"  - {readme_path.relative_to(repo_root)}")
     if args.seed and seed_path.exists():

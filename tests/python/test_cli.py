@@ -63,6 +63,7 @@ def test_init_bootstraps_repo(tmp_path: Path):
     repo = init_empty_repo(tmp_path)
     proc = run(repo, "init", check=True)
     assert "spec-vc 初始化成功" in proc.stdout
+    assert "uv sync" in proc.stdout
     assert (repo / ".spec-vc.toml").exists()
     assert (repo / "doc" / "arch" / "README.md").exists()
     assert (repo / "doc" / "arch" / "adr-000.md").exists()
@@ -71,6 +72,14 @@ def test_init_bootstraps_repo(tmp_path: Path):
     assert (repo / ".git" / "hooks" / "commit-msg").stat().st_mode & 0o111
     commit_template = subprocess.run(["git", "config", "commit.template"], cwd=repo, text=True, capture_output=True, check=True)
     assert commit_template.stdout.strip().endswith("templates/commit-msg")
+
+
+def test_init_runs_uv_sync(tmp_path: Path):
+    repo = init_empty_repo(tmp_path)
+    proc = run(repo, "init", check=True)
+    assert "uv sync" in proc.stdout
+    root = Path(__file__).resolve().parents[2]
+    assert (root / ".venv").exists()
 
 
 
