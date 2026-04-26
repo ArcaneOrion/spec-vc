@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+import os
 
 
 def run(repo: Path, *args: str, check: bool = False):
-    import os
     root = Path(__file__).resolve().parents[2]
     env = {**os.environ, "PYTHONPATH": str(root / "src")}
     proc = subprocess.run(
@@ -18,6 +18,21 @@ def run(repo: Path, *args: str, check: bool = False):
     if check and proc.returncode != 0:
         raise AssertionError(proc.stderr or proc.stdout)
     return proc
+
+
+def test_skill_doc_uses_uv_run_in_bootstrap_protocol():
+    root = Path(__file__).resolve().parents[2]
+    skill = (root / "SKILL.md").read_text()
+    assert "uv run spec-vc skill load --user-prompt" in skill
+    assert "默认一律使用 `uv run`" in skill
+
+
+def test_readme_documents_venv_bootstrap_with_uv_run():
+    root = Path(__file__).resolve().parents[2]
+    readme = (root / "README.md").read_text()
+    assert "uv sync" in readme
+    assert "uv run spec-vc skill load --user-prompt" in readme
+    assert "zsh: command not found: spec-vc" in readme
 
 
 def init_repo(tmp_path: Path) -> Path:

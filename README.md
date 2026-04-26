@@ -87,6 +87,30 @@ spec-vc/                       ← 本仓库即 skill
 
 前置:你在 Claude Code 中加载了本仓库作为 skill。
 
+### CLI 运行前提
+
+`spec-vc` 是本项目在 `pyproject.toml` 中声明的 Python console script。第一性原理上说,它只有在下面两种条件之一成立时才能直接被 shell 找到:
+
+- 该 entry point 已安装到当前 shell 可见的环境里
+- 你已经激活了本项目对应的虚拟环境
+
+skill 启动阶段最稳妥的做法,不是假设环境已激活,而是显式通过 `uv` 进入项目虚拟环境执行:
+
+```bash
+# 首次在仓库根目录准备环境
+uv sync
+
+# 之后统一这样调用
+uv run spec-vc --help
+uv run spec-vc skill load --user-prompt "你的请求"
+```
+
+如果你已经手动激活 `.venv`,也可以直接写 `spec-vc ...`;但 **SKILL 的引导文本默认应写成 `uv run spec-vc ...`**,否则很容易出现:
+
+```bash
+zsh: command not found: spec-vc
+```
+
 ```bash
 # 1. 在目标项目中初始化
 cd /path/to/your/project

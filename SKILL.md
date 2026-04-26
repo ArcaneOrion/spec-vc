@@ -18,9 +18,23 @@ disable-model-invocation: true
 
 ## 启动协议
 
+在执行任何 `spec-vc` CLI 命令前,先确认当前仓库根目录可用以下两种方式之一:
+
+- 优先使用 `uv run spec-vc ...`
+- 若用户已手动激活本项目虚拟环境,也可直接使用 `spec-vc ...`
+
+如果未确认虚拟环境已激活,**默认一律使用 `uv run`**,不要假设 shell 里已经存在 `spec-vc` 可执行文件。
+
+推荐顺序:
+
+1. 先在仓库根目录执行 `uv sync`
+2. 后续所有 CLI 调用统一写成 `uv run spec-vc ...`
+
+这样即使用户 shell 没有激活 `.venv`,也不会出现 `zsh: command not found: spec-vc`。
+
 加载本 skill 后，始终按下面顺序执行：
 
-1. 运行 `spec-vc skill load --user-prompt "<用户当前请求>"`
+1. 运行 `uv run spec-vc skill load --user-prompt "<用户当前请求>"`
 2. 读取并解释：
    - 仓库是否已初始化
    - 当前工作区是否 dirty
@@ -43,7 +57,7 @@ disable-model-invocation: true
    - `next_field`
    - `next_prompt`
 3. 只围绕 `next_prompt` 对用户发问
-4. 得到回答后，把**已知字段 + 新回答**统一写回 `spec-vc change clarify ...`
+4. 得到回答后，把**已知字段 + 新回答**统一写回 `uv run spec-vc change clarify ...`
 5. 如果 CLI 返回仍有 `missing:`，继续下一轮追问
 6. 只有当不再有缺项时，才停止澄清并进入 `plan`
 
@@ -66,7 +80,7 @@ disable-model-invocation: true
 当 `clarify` 完成、stage 进入 `plan` 后：
 
 - 先向用户确认：计划已具备执行前提
-- 然后引导做修改前验证：`spec-vc change validate --phase pre --content "..."`
+- 然后引导做修改前验证：`uv run spec-vc change validate --phase pre --content "..."`
 - 未有 pre-validation 前，不进入代码修改
 
 ### 3. `implement-ready`
@@ -80,14 +94,14 @@ disable-model-invocation: true
 
 代码修改完成后：
 
-- 引导记录后置验证：`spec-vc change validate --phase post --content "..."`
+- 引导记录后置验证：`uv run spec-vc change validate --phase post --content "..."`
 - 验证完成后，引导关闭变更
 
 ### 5. `close`
 
 关闭时：
 
-- 调用 `spec-vc change close --summary "..."`
+- 调用 `uv run spec-vc change close --summary "..."`
 - 该命令会自动回填 ADR 摘要、Implementation Plans、References/Commits
 - 关闭后 active context 会被清理
 
@@ -96,7 +110,7 @@ disable-model-invocation: true
 如果当前请求需要 ADR，且没有 active change：
 
 1. 先确认应关联哪个 ADR
-2. 运行 `spec-vc change start --adr ADR-XXX --summary "<本轮变更摘要>"`
+2. 运行 `uv run spec-vc change start --adr ADR-XXX --summary "<本轮变更摘要>"`
 3. 创建完成后立刻进入 `clarify` 协议
 
 ## 只读/轻量路径
@@ -106,8 +120,8 @@ disable-model-invocation: true
 - 不自动创建新 plan
 - 不强制进入完整澄清协议
 - 可继续使用：
-  - `spec-vc adr list`
-  - `spec-vc adr status`
+  - `uv run spec-vc adr list`
+  - `uv run spec-vc adr status`
 - 或走 `[ADR-none]` 提交流程
 
 ## 你必须遵守的停机条件
