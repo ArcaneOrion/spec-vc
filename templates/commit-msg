@@ -2,17 +2,17 @@
 #
 # type  : feat | fix | refactor | docs | test | chore | perf | style | build | ci
 # scope : 可选,模块/子系统名
-# subject: 祈使句,首字母小写,不超过 50 字
+# subject: 中文简述,不超过 50 字
 # [ADR-NNN] : 必填,关联的架构决策记录编号
 # [ADR-none]: 豁免标记,仅限不影响架构的改动(拼写/格式/依赖版本等)
 #
-# ---- body (可选) ----
-# 说明 *what* 和 *why*,不说 *how*(代码已经说了 how)
+# ---- 正文 (可选) ----
+# 说明 *做了什么* 和 *为什么*,不说 *怎么做*(代码已经说了怎么做)
 # 每行不超过 72 字
 #
-# ---- footer (可选) ----
-# BREAKING CHANGE: <说明>
-# Refs: <issue 编号 / 外部引用>
+# ---- 脚注 (可选) ----
+# 破坏性变更: <说明>
+# 引用: <issue 编号 / 外部引用>
 #
 # 示例:
 #   feat(auth): 引入 LDAP 客户端 [ADR-007]
