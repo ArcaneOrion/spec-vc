@@ -12,79 +12,69 @@
 
 Layer 3 已实现:结构化开发文档(dev-doc.md) + 形式化文件(.yaml/.json/.feature) + 双 subagent 验证协议(spec-vc commit)。三层并非独立 skill——都在同一个 `spec-vc` skill 内,用子命令前缀区分层。
 
-## 为什么需要它
+> 为什么需要三层版本控制？见 [前言 · 三层版本控制的动机与思想基础](doc/preface.md)。
 
-传统 `git` 只记录两件事:
-- **做了什么**(diff)
-- **怎么做的**(代码本身)
-
-但系统的演进还涉及两件事没被版本控制:
-
-- **为什么这么做**(决策 rationale) —— 留在人脑,人会遗忘、会离开。本 skill 的 `adr-*` 子命令族用 ADR 的 markdown 文本把它显式化,校验手段是人工审阅。
-- **应该做什么**(规格 normative) —— 需要一份**可机械验证的契约**,而不是散落在测试和文档里的非形式化约束。未来的 `spec-*` 子命令族将用 OpenAPI / Protobuf / JSON Schema / Gherkin(弱形式化)乃至 Lean 4 / TLA+(强形式化)作为载体,校验手段是 typechecker / prover / schema validator——**必须由机械过程产出**,不能是 AI 生成的"验证报告",否则规格版本控制退化为高级注释。
-
-Agent 时代把这两个裂缝都放大了:
-
-- Agent 参与生成代码,但不参与生成决策记忆。过两周连写代码的人自己都还原不出当时的约束。
-- Agent 生成的代码"看起来正确"的门槛很低,但"被证明正确"的门槛没变。没有可机械验证的规格,Agent 按错误理解的契约生成完全自洽的代码,错得更隐蔽——所有测试都可能通过,因为测试也是它写的。
-
-## 三层命题类型(正交,不可归约)
-
-三者正交——用同一个 artifact 承载多种命题类型,必然互相污染。它们通过**显式引用**相互锚定,不是线性栈:一条 ADR 可锚定多个 spec 单元;一个 spec 版本对应一组 code commit 范围。
-
-## 仓库布局(扁平)
+## 仓库布局
 
 ```
 spec-vc/                       ← 本仓库即 skill
-├── README.md                  ← 本文件(框架总览 + 实现进度)
-├── LICENSE                    ← (待定)
+├── README.md                  ← 框架总览 + 使用指南
 ├── SKILL.md                   ← Claude skill 入口(name: spec-vc)
-├── commands/                  ← 斜杠命令实现
-│   ├── adr-init.md            ← /spec-vc adr-init
-│   ├── adr-new.md
-│   ├── adr-link.md
-│   ├── adr-status.md
-│   ├── adr-list.md
-│   ├── adr-upgrade.md
-│   └── (未来:spec-init.md / spec-new.md / spec-validate.md / ...)
+├── pyproject.toml
+├── .spec-vc.toml              ← 自身配置(吃狗粮)
+├── src/spec_vc/               ← Python CLI 实现
+│   ├── cli.py                 ← 命令路由
+│   ├── adr.py                 ← ADR 领域模型
+│   ├── change.py              ← 变更状态机
+│   ├── spec.py                ← Spec 领域模型
+│   ├── commit.py              ← 双 subagent 验证协议
+│   ├── hooks.py               ← Git hook 校验
+│   ├── config.py              ← 配置模型
+│   ├── gitops.py              ← Git 操作封装
+│   ├── skill.py               ← 子系统上下文加载
+│   ├── status.py              ← ADR↔commit 漂移检测
+│   ├── index.py               ← ADR 索引导出
+│   └── _sections.py           ← Markdown 区块解析
 ├── templates/
 │   ├── adr.md                 ← Nygard 五段式
 │   ├── dev-doc.md             ← 结构化开发文档
-│   ├── index.md               ← ADR 索引模板
-│   ├── commit-msg             ← git commit message 模板
-│   ├── seed-adr-000.md        ← init 时的种子 ADR(固定内容)
 │   ├── contract.openapi.yaml  ← OpenAPI 骨架
 │   ├── schema.json            ← JSON Schema 骨架
-│   └── behavior.feature       ← Gherkin 骨架
+│   ├── behavior.feature       ← Gherkin 骨架
+│   ├── index.md               ← ADR 索引模板
+│   ├── commit-msg             ← commit message 模板
+│   └── seed-adr-000.md        ← 种子 ADR
 ├── hooks/
-│   ├── prepare-commit-msg     ← 起草时注入 [ADR-???] 槽位
-│   └── commit-msg             ← 严格校验 ADR 引用存在 + 状态有效
-├── scripts/
-│   ├── check-refs.sh          ← ADR↔commit 双向引用扫描
-│   └── new-adr.sh             ← 自增编号生成 ADR
-├── tests/
-│   └── e2e-init.sh            ← 最小端到端测试(12 用例)
+│   ├── prepare-commit-msg     ← 注入 [ADR-???] 槽位
+│   └── commit-msg             ← 校验 ADR 引用
+├── tests/python/              ← pytest 测试套件
 └── doc/                       ← 本仓库自身的决策记录(吃狗粮)
+    ├── preface.md             ← 前言:为什么需要三层版本控制
     └── arch/
-        ├── README.md
-        ├── adr-000.md         ← 采用 ADR 方法论
-        ├── adr-001.md         ← 严格模式 + [ADR-none] 豁免
-        └── adr-NNN.md ...
+        ├── README.md          ← ADR 索引
+        ├── adr-NNN.md         ← ADR 文件
+        └── plans/             ← 执行方案
 ```
 
-初始化一个目标项目(如 Alice)后,**目标项目**会多出:
+初始化到目标项目后：
 
 ```
 <project>/
-├── doc/
-│   └── arch/
-│       ├── README.md          ← ADR 索引(由 spec-vc 维护)
-│       ├── adr-000.md         ← 种子:采用 ADR 方法论
-│       └── adr-NNN.md ...
-└── .git/
-    └── hooks/
-        ├── prepare-commit-msg
-        └── commit-msg
+├── doc/arch/
+│   ├── README.md              ← ADR 索引
+│   ├── adr-000.md             ← 种子 ADR
+│   ├── adr-NNN.md             ← 自定义 ADR
+│   ├── specs/                 ← Spec 目录
+│   │   └── NNN/
+│   │       ├── dev-doc.md
+│   │       ├── contract.openapi.yaml
+│   │       ├── schema.json
+│   │       └── behavior.feature
+│   └── plans/                 ← 执行方案
+├── .spec-vc.toml              ← 项目配置
+└── .git/hooks/
+    ├── prepare-commit-msg
+    └── commit-msg
 ```
 
 ## 快速使用
@@ -118,26 +108,23 @@ zsh: command not found: spec-vc
 ```bash
 # 1. 在目标项目中初始化
 cd /path/to/your/project
-git init  # 若尚未初始化
-# 在 Claude Code 中运行
-/spec-vc adr-init
+git init
+uv run spec-vc adr init
 
 # 2. 每次做架构决策时
-/spec-vc adr-new "使用 LDAP 进行多租户集成"
-# → 生成 doc/arch/adr-007.md,打开编辑器填写五段式
+uv run spec-vc adr new "使用 LDAP 进行多租户集成"
+# → 生成 doc/arch/adr-001.md,填写五段式
 
-# 3. 写完代码后 commit
-git add .
-git commit
-# → prepare-commit-msg hook 提示 [ADR-???]
-# → 把它替换为 [ADR-007]
-# → commit-msg hook 校验 ADR-007 存在且状态有效后放行
+# 3. 创建结构化规格
+uv run spec-vc spec new "用户认证接口契约" --adr ADR-001
+# → 生成 doc/arch/specs/001/ 目录，含 dev-doc.md + 3 个形式化文件骨架
 
-# 4. 定期检查三层锚定健康
-/spec-vc adr-status
+# 4. 写完代码后，通过验证再提交
+uv run spec-vc commit
+# → 双 subagent 审计 + 测试，通过后自动 git commit
 
-# 5. 本仓库更新了 hook 后,同步到已初始化项目
-/spec-vc adr-upgrade
+# 5. 定期检查锚定健康
+uv run spec-vc adr status
 ```
 
 ## Commit message 规范
@@ -157,7 +144,7 @@ refactor(core): 拆分 message bus 为独立模块 [ADR-012]
 docs: 修正 README 拼写 [ADR-none]
 ```
 
-**豁免规则** (`[ADR-none]`):仅限不影响架构的改动。具体判定见 `hooks/commit-msg` 中的 `check_exemption` 函数(当前为占位,需按项目定制)。
+**豁免规则** (`[ADR-none]`):仅限不影响架构的改动。通过 `.spec-vc.toml` 的 `[exemption]` 配置段定制（路径、扩展名、行数阈值）。
 
 ## 路线图
 
@@ -167,16 +154,6 @@ docs: 修正 README 拼写 [ADR-none]
 - **v0.4**:强形式化预留位——spectral / ajv / Cucumber 机械验证器集成
 - **v1.0**:Lean 4 / TLA+ 规格的创建和验证
 
-## 思想基础
-
-- Michael Nygard (2011) · Documenting Architecture Decisions
-- 三层命题类型的分离:descriptive ≠ normative ≠ rationale
-- Agent 时代的版本控制语义层扩展:从"代码的时间机器"升级为"决策的时间机器"
-
 ## License
 
-待定(计划:MIT 或 CC0,以鼓励复用)。
-
-## Contributing
-
-本仓库遵循自己的规范——内部开发也用 spec-vc 管理架构演进,ADR 存于本仓库 `doc/arch/`。查看 `doc/arch/README.md` 了解本仓库自身的决策史。
+MIT
