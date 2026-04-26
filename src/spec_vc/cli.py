@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 
 from .adr import list_adrs, next_adr_id, render_adr, validate_title
+from .adr import parse_adr as parse_adr_file
+from .adr import ensure_referenceable as ensure_adr_referenceable
 from .change import (
     ClarifyInput,
     close_change,
@@ -23,6 +25,15 @@ from .hooks import run_commit_msg, run_prepare_commit_msg
 from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
+from .spec import (
+    create_spec,
+    formalize_spec,
+    list_formal_files,
+    list_specs,
+    next_spec_id,
+    specs_root as get_specs_root,
+    validate_title as validate_spec_title,
+)
 from .templates import skill_root, template_path
 
 
@@ -244,6 +255,92 @@ def cmd_skill_load(args: argparse.Namespace) -> int:
     recent = context.get("recent_adrs", [])
     for adr in recent:
         print(f"recent ADR-{adr.adr_id} [{adr.status}] {adr.title}")
+    spec_count = context.get("spec_count", 0)
+    print(f"spec_count: {spec_count}")
+    recent_specs = context.get("recent_specs", [])
+    for s in recent_specs:
+        print(f"recent Spec-{s.spec_id} [{s.status}] {s.title}")
+    return 0
+
+
+def cmd_spec_new(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    specs_root = get_specs_root(repo_root, config.spec.dir)
+    adr_dir = repo_root / config.project.adr_dir
+
+    if not args.adr:
+        raise UsageError("spec new 需要 --adr ADR-NNN, Spec 必须关联 ADR")
+    adr_id = args.adr.replace("ADR-", "").zfill(3)
+    adr_path = adr_dir / f"adr-{adr_id}.md"
+    if not adr_path.exists():
+        raise UsageError(f"关联的 ADR 不存在: ADR-{adr_id}")
+    adr = parse_adr_file(adr_path)
+    ensure_adr_referenceable(adr, adr_id)
+
+    title = validate_spec_title(args.title)
+    spec_id = next_spec_id(specs_root)
+    author = run_git(repo_root, "config", "user.name", check=False).strip() or "unknown"
+    doc_path = create_spec(specs_root, spec_id, title, author, f"ADR-{adr_id}", template_dir=skill_root() / "templates")
+    print(f"Spec-{spec_id}: {title}")
+    print(f"  {specs_root / spec_id / 'dev-doc.md'}")
+    for fname in ["contract.openapi.yaml", "schema.json", "behavior.feature"]:
+        print(f"  {specs_root / spec_id / fname}")
+    print(f"推荐 commit message: feat(<scope>): <subject> [ADR-{adr_id}]")
+    return 0
+
+
+def cmd_spec_list(_args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    specs_root = get_specs_root(repo_root, config.spec.dir)
+    specs = list_specs(specs_root)
+    if not specs:
+        print("(尚无 Spec 文件)")
+        return 0
+    for s in specs:
+        adr_info = f" -> {s.adr_ref}" if s.adr_ref else ""
+        print(f"Spec-{s.spec_id} [{s.status}] {s.title}{adr_info}")
+    return 0
+
+
+def cmd_spec_show(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    specs_root = get_specs_root(repo_root, config.spec.dir)
+    spec_id = args.id.replace("Spec-", "").zfill(3)
+    doc_path = specs_root / spec_id / "dev-doc.md"
+    if not doc_path.exists():
+        raise UsageError(f"Spec 不存在: Spec-{spec_id}")
+    print(doc_path.read_text())
+    formal = list_formal_files(specs_root, spec_id)
+    if formal:
+        print("---")
+        print("形式化文件:")
+        for fname in formal:
+            fpath = specs_root / spec_id / fname
+            print(f"  [{fname}] ({fpath.stat().st_size} bytes)")
+    else:
+        print("---")
+        print("(尚无形式化文件)")
+    return 0
+
+
+def cmd_spec_formalize(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    specs_root = get_specs_root(repo_root, config.spec.dir)
+    spec_id = args.id.replace("Spec-", "").zfill(3)
+
+    types: list[str]
+    if args.type == "all":
+        types = ["openapi", "jsonschema", "gherkin"]
+    else:
+        types = [args.type]
+
+    for ft in types:
+        out = formalize_spec(specs_root, spec_id, ft)
+        print(out)
     return 0
 
 
@@ -317,6 +414,26 @@ def build_parser() -> argparse.ArgumentParser:
     change_close = change_sub.add_parser("close")
     change_close.add_argument("--summary", required=True)
     change_close.set_defaults(func=cmd_change_close)
+
+    spec = sub.add_parser("spec")
+    spec_sub = spec.add_subparsers(dest="spec_command")
+
+    spec_new = spec_sub.add_parser("new")
+    spec_new.add_argument("title")
+    spec_new.add_argument("--adr", required=True)
+    spec_new.set_defaults(func=cmd_spec_new)
+
+    spec_list = spec_sub.add_parser("list")
+    spec_list.set_defaults(func=cmd_spec_list)
+
+    spec_show = spec_sub.add_parser("show")
+    spec_show.add_argument("id")
+    spec_show.set_defaults(func=cmd_spec_show)
+
+    spec_formalize = spec_sub.add_parser("formalize")
+    spec_formalize.add_argument("id")
+    spec_formalize.add_argument("--type", required=True, choices=["openapi", "jsonschema", "gherkin", "all"])
+    spec_formalize.set_defaults(func=cmd_spec_formalize)
 
     skill = sub.add_parser("skill")
     skill_sub = skill.add_subparsers(dest="skill_command")

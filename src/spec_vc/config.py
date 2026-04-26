@@ -25,6 +25,11 @@ class AdrRequiredConfig:
 
 
 @dataclass(slots=True)
+class SpecConfig:
+    dir: str = "doc/arch/specs"
+
+
+@dataclass(slots=True)
 class ProjectConfig:
     adr_dir: str = "doc/arch"
     strict: bool = True
@@ -35,6 +40,7 @@ class Config:
     project: ProjectConfig = field(default_factory=ProjectConfig)
     exemption: ExemptionConfig = field(default_factory=ExemptionConfig)
     adr_required: AdrRequiredConfig = field(default_factory=AdrRequiredConfig)
+    spec: SpecConfig = field(default_factory=SpecConfig)
 
 
 def load_config(repo_root: Path) -> Config:
@@ -45,6 +51,7 @@ def load_config(repo_root: Path) -> Config:
         project = data.get("project", {})
         exemption = data.get("exemption", {})
         adr_required = data.get("adr_required", {})
+        spec = data.get("spec", {})
         config.project.adr_dir = str(project.get("adr_dir", config.project.adr_dir))
         config.project.strict = bool(project.get("strict", config.project.strict))
         config.exemption.enabled = bool(exemption.get("enabled", config.exemption.enabled))
@@ -57,6 +64,7 @@ def load_config(repo_root: Path) -> Config:
         config.adr_required.doc_only_extensions = list(adr_required.get("doc_only_extensions", config.adr_required.doc_only_extensions))
         config.adr_required.keywords = list(adr_required.get("keywords", config.adr_required.keywords))
         config.adr_required.default_conservative = bool(adr_required.get("default_conservative", config.adr_required.default_conservative))
+        config.spec.dir = str(spec.get("dir", config.spec.dir))
     env_adr_dir = os.getenv("ADR_DIR")
     if env_adr_dir:
         config.project.adr_dir = env_adr_dir

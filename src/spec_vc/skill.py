@@ -5,6 +5,7 @@ from pathlib import Path
 from .change import change_context, infer_adr_required
 from .config import load_config
 from .gitops import repo_root_from, run_git
+from .spec import list_specs
 
 
 def load_subsystem_context(cwd: Path, user_prompt: str = "") -> dict[str, object]:
@@ -24,4 +25,8 @@ def load_subsystem_context(cwd: Path, user_prompt: str = "") -> dict[str, object
         required, reason = infer_adr_required(staged, user_prompt, config.adr_required)
         context['adr_required'] = required
         context['adr_required_reason'] = reason
+        spec_dir = repo_root / config.spec.dir
+        specs = list_specs(spec_dir) if spec_dir.exists() else []
+        context['spec_count'] = len(specs)
+        context['recent_specs'] = specs[-3:]
     return context

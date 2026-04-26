@@ -28,6 +28,8 @@
 | ADR-002 | hooks 安装使用 cp 而非 symlink | Accepted | 2026-04-20 |
 | ADR-003 | skill 扁平化 + 命令前缀统一为 /spec-vc adr-* | Accepted | 2026-04-20 |
 | ADR-004 | init命令增加uv环境安装步骤 | Proposed | 2026-04-26 |
+| ADR-005 | 引入 Spec 结构化规格层与 subagent 审计协议 | Proposed | 2026-04-26 |
+| ADR-006 | 引入 Spec 结构化规格层——给 AI 和人看的接口/数据/行为说明书 | Proposed | 2026-04-26 |
 
 ## 状态图例
 
