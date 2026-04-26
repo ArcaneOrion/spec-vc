@@ -25,6 +25,12 @@ from .hooks import run_commit_msg, run_prepare_commit_msg
 from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
+from .commit import (
+    cleanup_tests,
+    gather_commit_context,
+    prepare_audit_prompt,
+    prepare_test_prompt,
+)
 from .spec import (
     create_spec,
     formalize_spec,
@@ -261,6 +267,50 @@ def cmd_skill_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_commit(args: argparse.Namespace) -> int:
+    if args.subcommand == "clean":
+        repo_root = _repo_root()
+        config = load_config(repo_root)
+        specs_root = get_specs_root(repo_root, config.spec.dir)
+        removed = cleanup_tests(specs_root)
+        if removed:
+            print("已清理测试目录:")
+            for d in removed:
+                print(f"  {d}")
+        else:
+            print("(无测试目录需要清理)")
+        return 0
+
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    ctx = gather_commit_context(repo_root, config)
+
+    if not ctx.staged_files:
+        print("(无 staged changes，无需提交)")
+        return 0
+
+    print(f"## Staged Files ({len(ctx.staged_files)})")
+    for f in ctx.staged_files:
+        print(f"  {f}")
+
+    print(f"\n## Specs ({len(ctx.spec_dirs)})")
+    if not ctx.spec_dirs:
+        print("  (尚无 Spec 文件，跳过审计)")
+    else:
+        for spec_id in ctx.spec_dirs:
+            formal = ctx.formal_files.get(spec_id, [])
+            doc_status = "✓" if spec_id in ctx.dev_docs else "✗"
+            print(f"  Spec-{spec_id}: dev-doc [{doc_status}], formal: {', '.join(formal) if formal else '无'}")
+
+    print(f"\n## === AUDIT SUBAGENT PROMPT ===")
+    print(prepare_audit_prompt(ctx))
+
+    print(f"\n## === TEST SUBAGENT PROMPT ===")
+    print(prepare_test_prompt(ctx))
+
+    return 0
+
+
 def cmd_spec_new(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
@@ -432,6 +482,14 @@ def build_parser() -> argparse.ArgumentParser:
     spec_formalize.add_argument("id")
     spec_formalize.add_argument("--type", required=True, choices=["openapi", "jsonschema", "gherkin", "all"])
     spec_formalize.set_defaults(func=cmd_spec_formalize)
+
+    commit = sub.add_parser("commit")
+    commit_sub = commit.add_subparsers(dest="subcommand")
+    commit_run = commit_sub.add_parser("run")
+    commit_run.set_defaults(func=cmd_commit)
+    commit_clean = commit_sub.add_parser("clean")
+    commit_clean.set_defaults(func=cmd_commit)
+    commit.set_defaults(func=cmd_commit)
 
     skill = sub.add_parser("skill")
     skill_sub = skill.add_subparsers(dest="skill_command")
