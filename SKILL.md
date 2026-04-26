@@ -1,6 +1,6 @@
 ---
 name: spec-vc
-description: 加载 ADR 驱动的变更治理子系统，并以持续追问的方式推动变更从澄清到计划、验证与关闭。
+description: 加载 ADR 驱动的变更治理子系统，通过自然语言对齐推动变更从澄清到计划、验证与关闭。
 disable-model-invocation: true
 ---
 
@@ -49,30 +49,27 @@ disable-model-invocation: true
 
 ### 1. `clarify`
 
-如果当前 stage 是 `clarify`，不要让用户手写完整命令参数。你要：
+Clarify 是**自然语言对齐**阶段，不是问答填表。你作为 AI 的职责是：
 
-1. 运行 `uv run spec-vc change next-question`
-2. 读取返回的：
-   - `missing`
-   - `next_field`
-   - `next_prompt`
-3. 只围绕 `next_prompt` 对用户发问
-4. 得到回答后，把**已知字段 + 新回答**统一写回 `uv run spec-vc change clarify ...`
-5. 如果 CLI 返回仍有 `missing:`，继续下一轮追问
-6. 只有当不再有缺项时，才停止澄清并进入 `plan`
+1. 先理解用户想做什么，然后围绕下列 6 个方面展开**自然讨论**：
+   - 动机与上下文（为什么现在做、约束是什么）
+   - 目标与边界（做什么、不做什么）
+   - 设计与架构（模块划分、解耦、为什么这样设计）
+   - 实现路径（具体步骤、技术选型、先后顺序）
+   - 验证与测试（怎么确认做对了、测试策略）
+   - 风险与回滚（最可能出错的地方、怎么退回去）
 
-固定追问顺序如下：
+2. 这 6 个方面是你内部的 checklist，**不要逐条展示给用户**。在对话中自然地覆盖这些话题，缺了哪方面就在讨论中引导补齐。
 
-1. `goal` → 目标
-2. `scope` → 范围
-3. `non_goals` → 非目标
-4. `strategy` → 实现策略
-5. `risks` → 风险与回滚
-6. `acceptance` → 验收标准
+3. 讨论结束时，总结你对这 6 个方面的理解，请用户确认是否对齐。
+
+4. 确认后，运行 `uv run spec-vc change next-question` 检查是否仍有 missing——如果有遗漏，在对话中自然补齐。
+
+5. 所有字段补齐后，运行 `uv run spec-vc change clarify --motivation "..." --boundary "..." --design "..." --implementation "..." --verification "..." --rollback "..."` 一次性写入 plan。
 
 **禁止**：
-- 一次追问多个缺项，除非用户主动一次性补全
-- 重复问已经明确的字段
+- 把 6 个方面当问卷逐条问用户
+- 在还未对齐时就创建 ADR 或 plan
 - 在仍有缺项时进入实现阶段
 
 ### 2. `plan`
@@ -128,11 +125,11 @@ disable-model-invocation: true
 
 只有在以下六项全部明确后，才能结束 `clarify`：
 
-- 目标（goal）
-- 范围（scope）
-- 非目标（non_goals）
-- 实现策略（strategy）
-- 风险与回滚（risks）
-- 验收标准（acceptance）
+- 动机与上下文（motivation）
+- 目标与边界（boundary）
+- 设计与架构（design）
+- 实现路径（implementation）
+- 验证与测试（verification）
+- 风险与回滚（rollback）
 
-若缺任一项，继续追问。
+若缺任一项，继续在对话中自然补齐。

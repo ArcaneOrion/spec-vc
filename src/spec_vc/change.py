@@ -14,20 +14,20 @@ ACTIVE_FILE_NAME = "_active.md"
 PLAN_DIR_NAME = "plans"
 ACTIVE_STAGE_VALUES = {"discover", "clarify", "plan", "implement-ready", "validate", "close"}
 FIELD_LABELS = {
-    "goal": "目标",
-    "scope": "范围",
-    "non_goals": "非目标",
-    "strategy": "实现策略",
-    "risks": "风险与回滚",
-    "acceptance": "验收标准",
+    "motivation": "动机与上下文",
+    "boundary": "目标与边界",
+    "design": "设计与架构",
+    "implementation": "实现路径",
+    "verification": "验证与测试",
+    "rollback": "风险与回滚",
 }
 SECTION_BY_FIELD = {
-    "goal": "Goal",
-    "scope": "Scope",
-    "non_goals": "Non-Goals",
-    "strategy": "Implementation Strategy",
-    "risks": "Risks and Rollback",
-    "acceptance": "Acceptance Criteria",
+    "motivation": "Motivation and Context",
+    "boundary": "Goals and Boundaries",
+    "design": "Design and Architecture",
+    "implementation": "Implementation Path",
+    "verification": "Verification and Testing",
+    "rollback": "Risks and Rollback",
 }
 REQUIRED_CLARIFY_FIELDS = tuple(FIELD_LABELS.keys())
 
@@ -44,20 +44,18 @@ class ActiveChange:
 
 @dataclass(slots=True)
 class ClarifyInput:
-    goal: str = ""
-    scope: str = ""
-    non_goals: str = ""
-    strategy: str = ""
-    risks: str = ""
-    acceptance: str = ""
+    motivation: str = ""
+    boundary: str = ""
+    design: str = ""
+    implementation: str = ""
+    verification: str = ""
+    rollback: str = ""
 
 
 @dataclass(slots=True)
 class NextQuestion:
     stage: str
     missing_fields: list[str]
-    next_field: str | None
-    next_prompt: str | None
 
 
 def plans_dir(adr_dir: Path) -> Path:
@@ -193,11 +191,7 @@ def next_question(adr_dir: Path) -> NextQuestion:
         value = _read_section(text, SECTION_BY_FIELD[field])
         if value in {"待补充", "待澄清", "", "待补充字段"} or value.startswith("待补充字段"):
             missing.append(field)
-    next_field = missing[0] if missing else None
-    next_prompt = None
-    if next_field is not None:
-        next_prompt = f"请先明确本次变更的{FIELD_LABELS[next_field]}。"
-    return NextQuestion(stage=active.stage, missing_fields=missing, next_field=next_field, next_prompt=next_prompt)
+    return NextQuestion(stage=active.stage, missing_fields=missing)
 
 
 def create_plan(adr_dir: Path, adr_id: str, summary: str) -> Path:
@@ -226,27 +220,31 @@ def create_plan(adr_dir: Path, adr_id: str, summary: str) -> Path:
             "",
             "待补充",
             "",
-            "## Goal",
+            "## Motivation and Context",
             "",
             "待补充",
             "",
-            "## Scope",
+            "## Goals and Boundaries",
             "",
             "待补充",
             "",
-            "## Non-Goals",
+            "## Design and Architecture",
             "",
             "待补充",
             "",
-            "## Implementation Strategy",
+            "## Implementation Path",
+            "",
+            "待补充",
+            "",
+            "## Verification and Testing",
+            "",
+            "待补充",
+            "",
+            "## Risks and Rollback",
             "",
             "待补充",
             "",
             "## Affected Areas",
-            "",
-            "待补充",
-            "",
-            "## Acceptance Criteria",
             "",
             "待补充",
             "",
@@ -316,12 +314,12 @@ def clarify_plan(adr_dir: Path, clar: ClarifyInput) -> tuple[Path, list[str]]:
     text = _load_plan(path)
     history = "\n".join(
         [
-            f"- Goal: {clar.goal or '[missing]'}",
-            f"- Scope: {clar.scope or '[missing]'}",
-            f"- Non-Goals: {clar.non_goals or '[missing]'}",
-            f"- Strategy: {clar.strategy or '[missing]'}",
-            f"- Risks: {clar.risks or '[missing]'}",
-            f"- Acceptance: {clar.acceptance or '[missing]'}",
+            f"- 动机与上下文: {clar.motivation or '[missing]'}",
+            f"- 目标与边界: {clar.boundary or '[missing]'}",
+            f"- 设计与架构: {clar.design or '[missing]'}",
+            f"- 实现路径: {clar.implementation or '[missing]'}",
+            f"- 验证与测试: {clar.verification or '[missing]'}",
+            f"- 风险与回滚: {clar.rollback or '[missing]'}",
         ]
     )
     text = _replace_section(text, "Clarification History", history)

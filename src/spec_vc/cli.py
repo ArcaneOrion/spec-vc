@@ -177,12 +177,12 @@ def cmd_change_clarify(args: argparse.Namespace) -> int:
     plan, missing = clarify_plan(
         adr_dir,
         ClarifyInput(
-            goal=args.goal or "",
-            scope=args.scope or "",
-            non_goals=args.non_goals or "",
-            strategy=args.strategy or "",
-            risks=args.risks or "",
-            acceptance=args.acceptance or "",
+            motivation=args.motivation or "",
+            boundary=args.boundary or "",
+            design=args.design or "",
+            implementation=args.implementation or "",
+            verification=args.verification or "",
+            rollback=args.rollback or "",
         ),
     )
     print(plan)
@@ -214,10 +214,8 @@ def cmd_change_next_question(_args: argparse.Namespace) -> int:
     config = load_config(repo_root)
     question = next_question(repo_root / config.project.adr_dir)
     print(f"stage: {question.stage}")
-    print("missing: " + ", ".join(question.missing_fields))
-    if question.next_field is not None:
-        print(f"next_field: {question.next_field}")
-        print(f"next_prompt: {question.next_prompt}")
+    if question.missing_fields:
+        print("missing: " + ", ".join(question.missing_fields))
     return 0
 
 
@@ -387,12 +385,12 @@ def build_parser() -> argparse.ArgumentParser:
     change_start.set_defaults(func=cmd_change_start)
 
     change_clarify = change_sub.add_parser("clarify")
-    change_clarify.add_argument("--goal")
-    change_clarify.add_argument("--scope")
-    change_clarify.add_argument("--non-goals")
-    change_clarify.add_argument("--strategy")
-    change_clarify.add_argument("--risks")
-    change_clarify.add_argument("--acceptance")
+    change_clarify.add_argument("--motivation")
+    change_clarify.add_argument("--boundary")
+    change_clarify.add_argument("--design")
+    change_clarify.add_argument("--implementation")
+    change_clarify.add_argument("--verification")
+    change_clarify.add_argument("--rollback")
     change_clarify.set_defaults(func=cmd_change_clarify)
 
     change_validate = change_sub.add_parser("validate")

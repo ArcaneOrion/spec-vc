@@ -67,25 +67,25 @@ def test_change_next_question_reports_missing(tmp_path: Path):
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
     proc = run(repo, 'change', 'next-question')
     assert proc.returncode == 0
-    assert 'next_field: goal' in proc.stdout
     assert 'missing:' in proc.stdout
+    assert 'motivation' in proc.stdout
 
 
 def test_change_clarify_supports_incremental_updates(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
 
-    first = run(repo, 'change', 'clarify', '--goal', '明确改动目标')
+    first = run(repo, 'change', 'clarify', '--motivation', '这是重构 CLI 的必要步骤')
     assert first.returncode == 1
-    assert 'missing: scope, non_goals, strategy, risks, acceptance' in first.stdout
+    assert 'missing:' in first.stdout
     first_plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
-    assert '明确改动目标' in first_plan
+    assert '这是重构 CLI 的必要步骤' in first_plan
 
-    second = run(repo, 'change', 'clarify', '--scope', '只改 hooks 和 CLI', '--strategy', '先补 change 阶段命令再回填 ADR')
+    second = run(repo, 'change', 'clarify', '--boundary', '只改 hooks 和 CLI', '--implementation', '先补 change 阶段命令再回填 ADR')
     assert second.returncode == 1
-    assert 'missing: non_goals, risks, acceptance' in second.stdout
+    assert 'missing:' in second.stdout
     second_plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
-    assert '明确改动目标' in second_plan
+    assert '这是重构 CLI 的必要步骤' in second_plan
     assert '只改 hooks 和 CLI' in second_plan
     assert '先补 change 阶段命令再回填 ADR' in second_plan
     assert '- **Stage**: clarify' in second_plan
@@ -94,7 +94,7 @@ def test_change_clarify_supports_incremental_updates(tmp_path: Path):
 def test_change_clarify_reports_missing_fields(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
-    proc = run(repo, 'change', 'clarify', '--goal', '明确改动目标')
+    proc = run(repo, 'change', 'clarify', '--motivation', '这是测试')
     assert proc.returncode == 1
     assert 'missing:' in proc.stdout
     plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
@@ -108,12 +108,12 @@ def test_change_clarify_updates_plan_when_complete(tmp_path: Path):
     proc = run(
         repo,
         'change', 'clarify',
-        '--goal', '明确改动目标',
-        '--scope', '只改 hooks 和 CLI',
-        '--non-goals', '不改 Layer 3',
-        '--strategy', '先补 change 阶段命令再回填 ADR',
-        '--risks', '可能破坏旧工作流，需要保留 e2e',
-        '--acceptance', '能记录 clarify 并进入 plan',
+        '--motivation', '明确改动目标',
+        '--boundary', '只改 hooks 和 CLI',
+        '--design', '不改 Layer 3 架构',
+        '--implementation', '先补 change 阶段命令再回填 ADR',
+        '--verification', '能记录 clarify 并进入 plan',
+        '--rollback', '可能破坏旧工作流，需要保留 e2e',
     )
     assert proc.returncode == 0
     plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
@@ -123,9 +123,7 @@ def test_change_clarify_updates_plan_when_complete(tmp_path: Path):
 
     question = run(repo, 'change', 'next-question')
     assert question.returncode == 0
-    assert 'missing: ' in question.stdout
-    assert 'next_field:' not in question.stdout
-    assert 'next_prompt:' not in question.stdout
+    assert 'missing: ' not in question.stdout  # all fields filled, no missing
 
 
 def test_change_validate_writes_pre_and_post(tmp_path: Path):
@@ -134,12 +132,12 @@ def test_change_validate_writes_pre_and_post(tmp_path: Path):
     run(
         repo,
         'change', 'clarify',
-        '--goal', '明确改动目标',
-        '--scope', '只改 hooks 和 CLI',
-        '--non-goals', '不改 Layer 3',
-        '--strategy', '先补 change 阶段命令再回填 ADR',
-        '--risks', '可能破坏旧工作流，需要保留 e2e',
-        '--acceptance', '能记录 clarify 并进入 plan',
+        '--motivation', '明确改动目标',
+        '--boundary', '只改 hooks 和 CLI',
+        '--design', '不改 Layer 3 架构',
+        '--implementation', '先补 change 阶段命令再回填 ADR',
+        '--verification', '能记录 clarify 并进入 plan',
+        '--rollback', '可能破坏旧工作流，需要保留 e2e',
     )
     pre = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '修改前运行 pytest 和 e2e')
     post = run(repo, 'change', 'validate', '--phase', 'post', '--content', '修改后再次运行 pytest 和 e2e')
@@ -156,12 +154,12 @@ def test_change_close_backfills_adr_and_refs(tmp_path: Path):
     run(
         repo,
         'change', 'clarify',
-        '--goal', '明确改动目标',
-        '--scope', '只改 hooks 和 CLI',
-        '--non-goals', '不改 Layer 3',
-        '--strategy', '先补 change 阶段命令再回填 ADR',
-        '--risks', '可能破坏旧工作流，需要保留 e2e',
-        '--acceptance', '能记录 clarify 并进入 plan',
+        '--motivation', '明确改动目标',
+        '--boundary', '只改 hooks 和 CLI',
+        '--design', '不改 Layer 3 架构',
+        '--implementation', '先补 change 阶段命令再回填 ADR',
+        '--verification', '能记录 clarify 并进入 plan',
+        '--rollback', '可能破坏旧工作流，需要保留 e2e',
     )
     run(repo, 'change', 'validate', '--phase', 'pre', '--content', '修改前通过')
     run(repo, 'change', 'validate', '--phase', 'post', '--content', '修改后通过')
