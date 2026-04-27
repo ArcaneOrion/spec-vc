@@ -20,19 +20,17 @@ def run(repo: Path, *args: str, check: bool = False):
     return proc
 
 
-def test_skill_doc_uses_uv_run_in_bootstrap_protocol():
+def test_skill_doc_uses_correct_venv_path_in_bootstrap_protocol():
     root = Path(__file__).resolve().parents[2]
     skill = (root / "SKILL.md").read_text()
-    assert "uv run spec-vc skill load --user-prompt" in skill
-    assert "默认一律使用 `uv run`" in skill
+    assert "~/.claude/skills/spec-vc/.venv/bin/spec-vc skill load --user-prompt" in skill
+    assert "spec-vc 的 Python 环境和可执行文件位于" in skill
 
 
 def test_readme_documents_venv_bootstrap_with_uv_run():
     root = Path(__file__).resolve().parents[2]
     readme = (root / "README.md").read_text()
-    assert "uv sync" in readme
-    assert "uv run spec-vc skill load --user-prompt" in readme
-    assert "zsh: command not found: spec-vc" in readme
+    assert "uv run spec-vc" in readme
 
 
 def init_repo(tmp_path: Path) -> Path:
@@ -123,12 +121,33 @@ def test_commit_msg_rejects_multiple_tokens(tmp_path: Path):
     assert proc.returncode != 0
 
 
+def _write_token(repo: Path):
+    """写入一个有效的提交通行 token。"""
+    import time
+    import uuid
+    token_path = repo / ".git" / "spec-vc-commit-token"
+    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}"
+    token_path.write_text(token_content)
+
+
+def test_commit_msg_blocks_without_token(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0
+    assert "未找到提交 token" in proc.stderr
+
+
 def test_commit_msg_rejects_adr_none_for_code_change(tmp_path: Path):
     repo = init_repo(tmp_path)
     src = repo / "src"
     src.mkdir()
     (src / "main.py").write_text("print('x')\n")
     subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
+    _write_token(repo)
     msg = repo / "msg.txt"
     msg.write_text("feat: x [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
@@ -140,6 +159,7 @@ def test_commit_msg_allows_adr_none_for_docs_change(tmp_path: Path):
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _write_token(repo)
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))

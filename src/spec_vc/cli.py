@@ -31,6 +31,7 @@ from .commit import (
     gather_commit_context,
     prepare_audit_prompt,
     prepare_test_prompt,
+    write_commit_token,
 )
 from .spec import (
     create_spec,
@@ -285,6 +286,8 @@ def cmd_commit(args: argparse.Namespace) -> int:
     if not ctx.staged_files:
         print("(无 staged changes，无需提交)")
         return 0
+
+    write_commit_token(repo_root)
 
     print(f"## Staged Files ({len(ctx.staged_files)})")
     for f in ctx.staged_files:

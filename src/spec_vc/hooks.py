@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 
 from .adr import ensure_referenceable, exemption_allows, parse_adr
+from .commit import validate_and_consume_token
 from .config import load_config
 from .errors import ValidationError
 from .gitops import repo_root_from, staged_diff_numstat, staged_files
@@ -32,6 +33,11 @@ def run_commit_msg(message_file: Path) -> int:
     config = load_config(repo_root)
     subject = _subject(message_file)
     tokens = _extract_exact_tokens(subject)
+
+    try:
+        validate_and_consume_token(repo_root)
+    except (FileNotFoundError, ValueError, TimeoutError) as e:
+        raise ValidationError(str(e)) from e
 
     if any(token.startswith("ADR-?") for token in tokens):
         raise ValidationError(HELP_SLOT)

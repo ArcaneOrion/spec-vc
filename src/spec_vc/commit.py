@@ -3,9 +3,56 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
+import time
+import uuid
 
 from .config import Config
 from .gitops import run_git, staged_files
+
+TOKEN_TTL_SECONDS = 300
+TOKEN_FILENAME = "spec-vc-commit-token"
+
+
+def write_commit_token(repo_root: Path) -> Path:
+    """在 .git 目录写入一次性提交 token，返回 token 文件路径。"""
+    git_dir = repo_root / ".git"
+    token_path = git_dir / TOKEN_FILENAME
+    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}"
+    token_path.write_text(token_content)
+    return token_path
+
+
+def validate_and_consume_token(repo_root: Path) -> None:
+    """校验 token 存在且未过期，校验通过后消费（删除）token。"""
+    git_dir = repo_root / ".git"
+    token_path = git_dir / TOKEN_FILENAME
+
+    if not token_path.exists():
+        raise FileNotFoundError(
+            "未找到提交 token。请通过 spec-vc commit 流程提交代码，"
+            "不要直接使用 git commit。"
+        )
+
+    content = token_path.read_text().strip()
+    lines = content.split("\n")
+    if len(lines) < 2:
+        token_path.unlink()
+        raise ValueError("token 格式无效，请重新执行 spec-vc commit")
+
+    try:
+        token_ts = int(lines[1])
+    except ValueError:
+        token_path.unlink()
+        raise ValueError("token 格式无效，请重新执行 spec-vc commit")
+
+    if time.time() - token_ts > TOKEN_TTL_SECONDS:
+        token_path.unlink()
+        raise TimeoutError(
+            f"提交 token 已过期（有效期 {TOKEN_TTL_SECONDS // 60} 分钟），"
+            "请重新执行 spec-vc commit"
+        )
+
+    token_path.unlink()
 
 
 @dataclass
