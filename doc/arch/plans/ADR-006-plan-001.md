@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-006
 - **ADR Title**: 引入 commit token 门禁机制，强制通过 spec-vc commit 提交
-- **Stage**: implement-ready
+- **Stage**: close
 - **Created At**: 2026-04-27T16:03:23
 - **Summary**: 在 commit-msg hook 中增加 token 校验：spec-vc commit 写入一次性 token，hook 验 token 无则阻塞，阻断绕过 spec-vc 直接 git commit 的路径
 
@@ -67,16 +67,19 @@ token 残留风险(过期时间+一次性消费); 最坏情况手动删除 .git/
 
 ## Post-Change Validation
 
-待补充
+变更后验证：1) 46/46 测试全部通过 2) 无 token 直接 git commit 被阻塞: '未找到提交 token。请通过 spec-vc commit 流程提交代码' 3) spec-vc commit 写入 token 后 git commit 成功 4) token 一次性消费，提交后自动删除
+
 
 ## Closure Summary
 
-待补充
+在 commit-msg hook 中增加 token 校验逻辑: spec-vc commit 在 .git/spec-vc-commit-token 写入一次性 token (300s 过期)，commit-msg hook 校验 token 存在且未过期后消费。同步更新 SKILL.md 启动协议和 plan 阶段展示要求。新增 test_commit_msg_blocks_without_token 测试覆盖无 token 阻塞场景。全量 46 测试通过。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-006-plan-001.md
+
 
 ## Risks and Rollback
 
