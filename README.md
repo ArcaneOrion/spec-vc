@@ -105,27 +105,20 @@ uv run spec-vc skill load --user-prompt "你的请求"
 zsh: command not found: spec-vc
 ```
 
+人在 Claude Code 中只需要三个动作：
+
 ```bash
-# 1. 在目标项目中初始化
-cd /path/to/your/project
-git init
+# 1. 加载 skill（在 Claude Code 对话中）
+/spec-vc
+
+# 2. 初始化项目（AI 引导执行）
 uv run spec-vc adr init
 
-# 2. 每次做架构决策时
-uv run spec-vc adr new "使用 LDAP 进行多租户集成"
-# → 生成 doc/arch/adr-001.md,填写五段式
-
-# 3. 创建结构化规格
-uv run spec-vc spec new "用户认证接口契约" --adr ADR-001
-# → 生成 doc/arch/specs/001/ 目录，含 dev-doc.md + 3 个形式化文件骨架
-
-# 4. 写完代码后，通过验证再提交
+# 3. 提交代码（AI 引导验证后执行）
 uv run spec-vc commit
-# → 双 subagent 审计 + 测试，通过后自动 git commit
-
-# 5. 定期检查锚定健康
-uv run spec-vc adr status
 ```
+
+其余命令（`adr new`、`spec new`、`spec formalize` 等）由 skill 的 AI 在对话流程中自动执行，人不必手动输入。详见 `SKILL.md`。
 
 ## Commit message 规范
 
