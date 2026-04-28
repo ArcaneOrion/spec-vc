@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 import sys
@@ -51,8 +52,8 @@ def test_commit_reports_staged_files(tmp_path: Path):
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     proc = run(repo, "commit")
     assert proc.returncode == 0
-    assert "Staged Files" in proc.stdout
-    assert "README.md" in proc.stdout
+    assert "Staged Files" in proc.stderr
+    assert "README.md" in proc.stderr
 
 
 def _stage_src_file(repo: Path) -> None:
@@ -64,7 +65,7 @@ def _stage_src_file(repo: Path) -> None:
 def test_commit_generates_audit_prompt(tmp_path: Path):
     repo = init_repo(tmp_path)
     _stage_src_file(repo)
-    proc = run(repo, "commit")
+    proc = run(repo, "commit", "--format", "text")
     assert proc.returncode == 0
     assert "AUDIT SUBAGENT PROMPT" in proc.stdout
     assert "审计规则" in proc.stdout
@@ -74,7 +75,7 @@ def test_commit_generates_audit_prompt(tmp_path: Path):
 def test_commit_generates_test_prompt(tmp_path: Path):
     repo = init_repo(tmp_path)
     _stage_src_file(repo)
-    proc = run(repo, "commit")
+    proc = run(repo, "commit", "--format", "text")
     assert proc.returncode == 0
     assert "TEST SUBAGENT PROMPT" in proc.stdout
     assert "测试生成" in proc.stdout
@@ -128,9 +129,16 @@ GET /test:
 
     proc = run(repo, "commit")
     assert proc.returncode == 0
-    assert "Spec-001" in proc.stdout
-    assert "formal: contract.openapi.yaml" in proc.stdout
-    assert "测试概述" in proc.stdout
+    # human-readable info on stderr
+    assert "Spec-001" in proc.stderr
+    assert "formal: contract.openapi.yaml" in proc.stderr
+    # JSON manifest on stdout
+    manifest = json.loads(proc.stdout)
+    assert "audit_units" in manifest
+    assert "test_units" in manifest
+    assert "complexity_report" in manifest
+    assert len(manifest["audit_units"]) == 1
+    assert manifest["audit_units"][0]["spec_id"] == "001"
 
 
 def test_commit_clean_removes_tests(tmp_path: Path):

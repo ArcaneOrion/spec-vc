@@ -27,8 +27,10 @@ from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
 from .commit import (
+    build_audit_manifest,
     cleanup_tests,
     gather_commit_context,
+    manifest_to_json,
     prepare_audit_prompt,
     prepare_test_prompt,
     write_commit_token,
@@ -308,42 +310,63 @@ def cmd_commit(args: argparse.Namespace) -> int:
         return 0
 
     if ctx.spec_readiness_issues:
-        print("## Spec 就绪检查 - 未通过")
-        print("")
-        print("以下 Spec 未完成填写或形式化，请先补齐后再提交：")
-        print("")
+        print("## Spec 就绪检查 - 未通过", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("以下 Spec 未完成填写或形式化，请先补齐后再提交：", file=sys.stderr)
+        print("", file=sys.stderr)
         for issue in ctx.spec_readiness_issues:
-            print(f"  Spec-{issue.spec_id} / {issue.location}")
-            print(f"    → {issue.problem}")
-        print("")
-        print("修复步骤：")
-        print("  1. 填写 dev-doc.md 中各区块内容（概述/接口契约/数据形状/行为规则）")
-        print("  2. 运行 spec-vc spec formalize 生成形式化文件")
-        print("  3. 运行 spec-vc spec check 确认就绪")
+            print(f"  Spec-{issue.spec_id} / {issue.location}", file=sys.stderr)
+            print(f"    → {issue.problem}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("修复步骤：", file=sys.stderr)
+        print("  1. 填写 dev-doc.md 中各区块内容（概述/接口契约/数据形状/行为规则）", file=sys.stderr)
+        print("  2. 运行 spec-vc spec formalize 生成形式化文件", file=sys.stderr)
+        print("  3. 运行 spec-vc spec check 确认就绪", file=sys.stderr)
         return 1
 
     write_commit_token(repo_root)
 
-    print(f"## Staged Files ({len(ctx.staged_files)})")
-    for f in ctx.staged_files:
-        print(f"  {f}")
+    use_text = getattr(args, 'format', 'json') == 'text'
 
-    print(f"\n## Specs ({len(ctx.spec_dirs)})")
+    print(f"## Staged Files ({len(ctx.staged_files)})", file=sys.stderr)
+    for f in ctx.staged_files:
+        print(f"  {f}", file=sys.stderr)
+
+    print(f"\n## Specs ({len(ctx.spec_dirs)})", file=sys.stderr)
     if not ctx.spec_dirs:
-        print("  (尚无 Spec 文件，跳过审计)")
+        print("  (尚无 Spec 文件，跳过审计)", file=sys.stderr)
     else:
         for spec_id in ctx.spec_dirs:
             formal = ctx.formal_files.get(spec_id, [])
             doc_status = "✓" if spec_id in ctx.dev_docs else "✗"
-            print(f"  Spec-{spec_id}: dev-doc [{doc_status}], formal: {', '.join(formal) if formal else '无'}")
+            print(f"  Spec-{spec_id}: dev-doc [{doc_status}], formal: {', '.join(formal) if formal else '无'}", file=sys.stderr)
 
-    print(f"\n## === AUDIT SUBAGENT PROMPT ===")
-    print(prepare_audit_prompt(ctx))
-
-    print(f"\n## === TEST SUBAGENT PROMPT ===")
-    print(prepare_test_prompt(ctx))
+    if use_text:
+        print(f"\n## === AUDIT SUBAGENT PROMPT ===")
+        print(prepare_audit_prompt(ctx))
+        print(f"\n## === TEST SUBAGENT PROMPT ===")
+        print(prepare_test_prompt(ctx))
+    else:
+        manifest = build_audit_manifest(ctx)
+        print(manifest_to_json(manifest))
 
     return 0
+
+
+def cmd_commit_verify(args: argparse.Namespace) -> int:
+    from .verify import run_verify
+
+    result = run_verify(
+        audit_report_path=Path(args.audit_report),
+        test_report_path=Path(args.test_report),
+        manifest_path=Path(args.manifest),
+    )
+
+    import json
+    from dataclasses import asdict
+
+    print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+    return 0 if result.all_pass else 1
 
 
 def cmd_spec_new(args: argparse.Namespace) -> int:
@@ -541,9 +564,15 @@ def build_parser() -> argparse.ArgumentParser:
     spec_check.set_defaults(func=cmd_spec_check)
 
     commit = sub.add_parser("commit")
+    commit.add_argument("--format", choices=["json", "text"], default="json")
     commit_sub = commit.add_subparsers(dest="subcommand")
     commit_clean = commit_sub.add_parser("clean")
     commit_clean.set_defaults(func=cmd_commit)
+    commit_verify = commit_sub.add_parser("verify")
+    commit_verify.add_argument("--audit-report", required=True)
+    commit_verify.add_argument("--test-report", required=True)
+    commit_verify.add_argument("--manifest", required=True)
+    commit_verify.set_defaults(func=cmd_commit_verify)
     commit.set_defaults(func=cmd_commit)
 
     skill = sub.add_parser("skill")

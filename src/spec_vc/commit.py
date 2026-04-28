@@ -2,12 +2,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
+import math
 import shutil
+import sys
 import time
 import uuid
 
 from .config import Config
 from .gitops import run_git, staged_files
+from .manifest import (
+    AuditManifest,
+    AuditUnit,
+    ComplexityReport,
+    DevDocSummary,
+    TestUnit,
+)
+from .spec import specs_root as get_specs_root
 
 TOKEN_TTL_SECONDS = 300
 TOKEN_FILENAME = "spec-vc-commit-token"
@@ -68,7 +79,7 @@ class CommitContext:
 
 
 def gather_commit_context(repo_root: Path, config: Config) -> CommitContext:
-    from .spec import list_formal_files, list_specs, specs_root as get_specs_root, check_spec_readiness
+    from .spec import list_formal_files, list_specs, check_spec_readiness
 
     specs_root = get_specs_root(repo_root, config.spec.dir)
     files = staged_files(repo_root)
@@ -231,3 +242,117 @@ def cleanup_tests(specs_root: Path) -> list[str]:
             shutil.rmtree(test_dir)
             removed.append(str(test_dir))
     return removed
+
+
+def _compute_audit_complexity(num_formal_files: int, diff_line_count: int) -> int:
+    score = num_formal_files * 2
+    if diff_line_count > 100:
+        score += 3
+    elif diff_line_count > 30:
+        score += 2
+    elif diff_line_count > 0:
+        score += 1
+    return min(score, 10)
+
+
+def _compute_test_complexity(formal_type: str, content: str) -> int:
+    lines = content.splitlines()
+    if formal_type == "openapi":
+        path_count = sum(1 for line in lines if line.strip().startswith("/") or "get:" in line or "post:" in line or "put:" in line or "delete:" in line or "patch:" in line)
+        return min(max(1, path_count), 10)
+    elif formal_type == "jsonschema":
+        prop_count = content.count('"type"')
+        return min(max(1, prop_count // 2), 10)
+    elif formal_type == "gherkin":
+        scenario_count = sum(1 for line in lines if line.strip().startswith("Scenario"))
+        return min(max(1, scenario_count), 10)
+    return 1
+
+
+def build_audit_manifest(ctx: CommitContext) -> AuditManifest:
+    from .spec import parse_spec as _parse_spec
+
+    audit_units: list[AuditUnit] = []
+    test_units: list[TestUnit] = []
+    diff_lines = len(ctx.staged_diff.splitlines()) if ctx.staged_diff else 0
+
+    for spec_id in ctx.spec_dirs:
+        doc_summary = DevDocSummary()
+        adr_ref = "未知"
+        try:
+            spec = _parse_spec(ctx.specs_root / spec_id / "dev-doc.md")
+        except Exception as e:
+            print(f"[spec-vc] 警告: Spec-{spec_id} dev-doc.md 解析失败 ({e})，审计上下文可能不完整", file=sys.stderr)
+        else:
+            adr_ref = spec.adr_ref
+            doc_summary = DevDocSummary(
+                overview=spec.overview,
+                interface_contract=spec.interface_contract,
+                data_shape=spec.data_shape,
+                behavior_rules=spec.behavior_rules,
+                non_goals=spec.non_goals,
+            )
+
+        formal_files: dict[str, str] = {}
+        for fname in ctx.formal_files.get(spec_id, []):
+            fpath = ctx.specs_root / spec_id / fname
+            if fpath.exists():
+                formal_files[fname] = fpath.read_text()
+
+        complexity = _compute_audit_complexity(len(formal_files), diff_lines)
+
+        audit_units.append(
+            AuditUnit(
+                unit_id=f"audit-{spec_id}",
+                spec_id=spec_id,
+                adr_ref=adr_ref,
+                dev_doc_summary=doc_summary,
+                formal_files=formal_files,
+                complexity_score=complexity,
+            )
+        )
+
+        for fname, content in formal_files.items():
+            formal_type = {
+                "contract.openapi.yaml": "openapi",
+                "schema.json": "jsonschema",
+                "behavior.feature": "gherkin",
+            }.get(fname, "unknown")
+            if formal_type == "unknown":
+                continue
+            test_complexity = _compute_test_complexity(formal_type, content)
+            test_units.append(
+                TestUnit(
+                    unit_id=f"test-{spec_id}-{formal_type}",
+                    spec_id=spec_id,
+                    formal_type=formal_type,
+                    formal_content=content,
+                    test_dir=f"specs/{spec_id}/tests/",
+                    estimated_complexity=test_complexity,
+                )
+            )
+
+    total_audit = len(audit_units)
+    total_test = len(test_units)
+    complexity_report = ComplexityReport(
+        total_audit_units=total_audit,
+        total_test_units=total_test,
+        recommended_audit_agents=max(1, math.ceil(total_audit / 3)),
+        recommended_test_agents=max(1, math.ceil(total_test / 3)),
+    )
+
+    return AuditManifest(
+        repo_root=str(ctx.repo_root),
+        specs_root=str(ctx.specs_root),
+        staged_files=ctx.staged_files,
+        staged_diff=ctx.staged_diff,
+        audit_units=audit_units,
+        test_units=test_units,
+        complexity_report=complexity_report,
+    )
+
+
+def manifest_to_json(manifest: AuditManifest) -> str:
+    from dataclasses import asdict
+
+    return json.dumps(asdict(manifest), ensure_ascii=False, indent=2)

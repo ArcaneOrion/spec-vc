@@ -235,8 +235,8 @@ def test_commit_blocks_on_incomplete_specs(tmp_path: Path):
 
     proc = run(repo, "commit")
     assert proc.returncode == 1
-    assert "Spec 就绪检查" in proc.stdout
-    assert "未通过" in proc.stdout
+    assert "Spec 就绪检查" in proc.stderr
+    assert "未通过" in proc.stderr
 
 
 def test_commit_passes_with_ready_specs(tmp_path: Path):
@@ -254,5 +254,9 @@ def test_commit_passes_with_ready_specs(tmp_path: Path):
 
     proc = run(repo, "commit")
     assert proc.returncode == 0
-    assert "AUDIT SUBAGENT PROMPT" in proc.stdout
-    assert "Spec-001" in proc.stdout
+    import json
+    manifest = json.loads(proc.stdout)
+    assert "audit_units" in manifest
+    assert len(manifest["audit_units"]) == 1
+    assert manifest["audit_units"][0]["spec_id"] == "001"
+    assert "Spec-001" in proc.stderr
