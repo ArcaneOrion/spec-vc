@@ -64,10 +64,11 @@ class CommitContext:
     spec_dirs: list[str]
     formal_files: dict[str, list[str]]
     dev_docs: dict[str, str]
+    spec_readiness_issues: list
 
 
 def gather_commit_context(repo_root: Path, config: Config) -> CommitContext:
-    from .spec import list_formal_files, list_specs, specs_root as get_specs_root
+    from .spec import list_formal_files, list_specs, specs_root as get_specs_root, check_spec_readiness
 
     specs_root = get_specs_root(repo_root, config.spec.dir)
     files = staged_files(repo_root)
@@ -85,6 +86,8 @@ def gather_commit_context(repo_root: Path, config: Config) -> CommitContext:
         if dev_doc_path.exists():
             dev_docs[s.spec_id] = dev_doc_path.read_text()
 
+    readiness_issues = check_spec_readiness(specs_root)
+
     return CommitContext(
         repo_root=repo_root,
         specs_root=specs_root,
@@ -93,6 +96,7 @@ def gather_commit_context(repo_root: Path, config: Config) -> CommitContext:
         spec_dirs=spec_dirs,
         formal_files=formal_files,
         dev_docs=dev_docs,
+        spec_readiness_issues=readiness_issues,
     )
 
 

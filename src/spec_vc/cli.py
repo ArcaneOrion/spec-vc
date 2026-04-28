@@ -34,6 +34,7 @@ from .commit import (
     write_commit_token,
 )
 from .spec import (
+    check_spec_readiness,
     create_spec,
     formalize_spec,
     list_formal_files,
@@ -199,6 +200,25 @@ def cmd_change_clarify(args: argparse.Namespace) -> int:
 def cmd_change_validate(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
+
+    if args.phase == "pre":
+        specs_root = get_specs_root(repo_root, config.spec.dir)
+        issues = check_spec_readiness(specs_root)
+        if issues:
+            print("Spec 就绪检查 - 未通过")
+            print("")
+            print("在进入 implement-ready（代码修改）前，以下 Spec 必须完成：")
+            print("")
+            for issue in issues:
+                print(f"  Spec-{issue.spec_id} / {issue.location}")
+                print(f"    → {issue.problem}")
+            print("")
+            print("修复步骤：")
+            print("  1. 填写 dev-doc.md 中各区块内容")
+            print("  2. 运行 spec-vc spec formalize 生成形式化文件")
+            print("  3. 运行 spec-vc spec check 确认就绪")
+            return 1
+
     plan = record_validation(repo_root / config.project.adr_dir, args.phase, args.content)
     print(plan)
     return 0
@@ -286,6 +306,21 @@ def cmd_commit(args: argparse.Namespace) -> int:
     if not ctx.staged_files:
         print("(无 staged changes，无需提交)")
         return 0
+
+    if ctx.spec_readiness_issues:
+        print("## Spec 就绪检查 - 未通过")
+        print("")
+        print("以下 Spec 未完成填写或形式化，请先补齐后再提交：")
+        print("")
+        for issue in ctx.spec_readiness_issues:
+            print(f"  Spec-{issue.spec_id} / {issue.location}")
+            print(f"    → {issue.problem}")
+        print("")
+        print("修复步骤：")
+        print("  1. 填写 dev-doc.md 中各区块内容（概述/接口契约/数据形状/行为规则）")
+        print("  2. 运行 spec-vc spec formalize 生成形式化文件")
+        print("  3. 运行 spec-vc spec check 确认就绪")
+        return 1
 
     write_commit_token(repo_root)
 
@@ -392,6 +427,25 @@ def cmd_spec_formalize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_spec_check(_args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    specs_root = get_specs_root(repo_root, config.spec.dir)
+    specs = list_specs(specs_root)
+    if not specs:
+        print("(尚无 Spec 文件)")
+        return 0
+    issues = check_spec_readiness(specs_root)
+    if not issues:
+        print(f"全部 {len(specs)} 个 Spec 就绪")
+        return 0
+    print("以下 Spec 未完成：")
+    for issue in issues:
+        print(f"  Spec-{issue.spec_id} / {issue.location}")
+        print(f"    → {issue.problem}")
+    return 1
+
+
 def cmd_hook_commit_msg(args: argparse.Namespace) -> int:
     return run_commit_msg(Path(args.message_file))
 
@@ -482,6 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
     spec_formalize.add_argument("id")
     spec_formalize.add_argument("--type", required=True, choices=["openapi", "jsonschema", "gherkin", "all"])
     spec_formalize.set_defaults(func=cmd_spec_formalize)
+
+    spec_check = spec_sub.add_parser("check")
+    spec_check.set_defaults(func=cmd_spec_check)
 
     commit = sub.add_parser("commit")
     commit_sub = commit.add_subparsers(dest="subcommand")

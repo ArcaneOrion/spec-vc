@@ -122,7 +122,9 @@ GET /test:
 
 - **ADR**: ADR-000
 """)
-    (spec_dir / "contract.openapi.yaml").write_text("openapi: \"3.0.3\"\ninfo:\n  title: test\npaths: {}\n")
+    (spec_dir / "contract.openapi.yaml").write_text("openapi: \"3.0.3\"\ninfo:\n  title: test\npaths:\n  /test:\n    get:\n      responses:\n        200:\n          description: ok\n")
+    (spec_dir / "schema.json").write_text('{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"test","type":"object","properties":{"status":{"type":"string"}}}')
+    (spec_dir / "behavior.feature").write_text("Feature: test\n  Scenario: get status\n    When GET /test\n    Then status is 200\n")
 
     proc = run(repo, "commit")
     assert proc.returncode == 0

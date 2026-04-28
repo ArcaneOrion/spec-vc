@@ -188,6 +188,74 @@ def list_formal_files(specs_root: Path, spec_id: str) -> list[str]:
     return files
 
 
+@dataclass(slots=True)
+class SpecReadinessIssue:
+    spec_id: str
+    location: str
+    problem: str
+
+
+def _is_formal_skeleton(filepath: Path, formal_type: str) -> bool:
+    """检测形式化文件是否仍为模板骨架（未被 formalize）。"""
+    if not filepath.exists():
+        return True
+    content = filepath.read_text().strip()
+    if formal_type == "openapi":
+        return "paths: {}" in content
+    if formal_type == "jsonschema":
+        return '"properties": {}' in content or '"properties":{}' in content
+    if formal_type == "gherkin":
+        lines = content.splitlines()
+        if len(lines) == 2 and lines[1].startswith("  Spec-"):
+            return True
+        # Also catch the case where description is empty
+        if len(lines) == 2 and lines[1].strip() == "":
+            return True
+        return False
+    return False
+
+
+_SECTIONS_TO_CHECK = ["概述", "接口契约", "数据形状", "行为规则"]
+
+
+def check_spec_readiness(specs_root: Path) -> list[SpecReadinessIssue]:
+    """检查所有 Spec 的 dev-doc.md 是否填写完整、形式化文件是否已生成。"""
+    issues: list[SpecReadinessIssue] = []
+    specs = list_specs(specs_root)
+    for spec in specs:
+        doc_path = dev_doc_path(specs_root, spec.spec_id)
+        text = doc_path.read_text()
+
+        for section_name in _SECTIONS_TO_CHECK:
+            content = extract_section(text, section_name)
+            if not content.strip() or content.strip() == "待补充":
+                issues.append(
+                    SpecReadinessIssue(
+                        spec_id=spec.spec_id,
+                        location=f"dev-doc.md ## {section_name}",
+                        problem="区块未填写",
+                    )
+                )
+
+        formal_types = [
+            ("contract.openapi.yaml", "openapi", "接口契约"),
+            ("schema.json", "jsonschema", "数据形状"),
+            ("behavior.feature", "gherkin", "行为规则"),
+        ]
+        for fname, ftype, section_name in formal_types:
+            fpath = spec_basedir(specs_root, spec.spec_id) / fname
+            if _is_formal_skeleton(fpath, ftype):
+                issues.append(
+                    SpecReadinessIssue(
+                        spec_id=spec.spec_id,
+                        location=fname,
+                        problem=f"形式化文件未生成（对应 dev-doc.md ## {section_name}）",
+                    )
+                )
+
+    return issues
+
+
 def formalize_spec(
     specs_root: Path,
     spec_id: str,

@@ -196,3 +196,60 @@ def test_change_should_adr_for_docs_only(tmp_path: Path):
     proc = run(repo, 'change', 'should-adr', 'README.md', 'doc/notes.md')
     assert proc.returncode == 1
     assert 'required: False' in proc.stdout
+
+
+def test_change_validate_pre_blocks_on_incomplete_specs(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
+    run(
+        repo,
+        'change', 'clarify',
+        '--motivation', '明确改动目标',
+        '--boundary', '只改 hooks 和 CLI',
+        '--design', '不改 Layer 3 架构',
+        '--implementation', '先补 change 阶段命令再回填 ADR',
+        '--verification', '能记录 clarify 并进入 plan',
+        '--rollback', '可能破坏旧工作流，需要保留 e2e',
+    )
+    # 创建 Spec 但不填写 dev-doc 也不 formalize
+    run(repo, 'spec', 'new', '用户认证', '--adr', 'ADR-000')
+
+    proc = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '修改前验证')
+    assert proc.returncode == 1
+    assert 'Spec 就绪检查' in proc.stdout
+    assert '未通过' in proc.stdout
+    assert 'dev-doc.md' in proc.stdout
+
+
+def test_change_validate_pre_passes_with_ready_specs(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')
+    run(
+        repo,
+        'change', 'clarify',
+        '--motivation', '明确改动目标',
+        '--boundary', '只改 hooks 和 CLI',
+        '--design', '不改 Layer 3 架构',
+        '--implementation', '先补 change 阶段命令再回填 ADR',
+        '--verification', '能记录 clarify 并进入 plan',
+        '--rollback', '可能破坏旧工作流，需要保留 e2e',
+    )
+    run(repo, 'spec', 'new', '用户认证', '--adr', 'ADR-000')
+    # 填写 dev-doc
+    base = repo / 'doc' / 'arch' / 'specs' / '001'
+    doc = (base / 'dev-doc.md').read_text()
+    sections = [
+        ('## 概述\n\n待补充', '## 概述\n\n认证模块接口规格。'),
+        ('## 接口契约\n\n待补充', '## 接口契约\n\n```yaml\nPOST /login\n```'),
+        ('## 数据形状\n\n待补充', '## 数据形状\n\nJWT RS256 签名。'),
+        ('## 行为规则\n\n待补充', '## 行为规则\n\nFeature: 连续失败锁定\n'),
+    ]
+    for old, new in sections:
+        doc = doc.replace(old, new)
+    (base / 'dev-doc.md').write_text(doc)
+    run(repo, 'spec', 'formalize', '001', '--type', 'all')
+
+    proc = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '修改前验证')
+    assert proc.returncode == 0
+    plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
+    assert '- **Stage**: implement-ready' in plan

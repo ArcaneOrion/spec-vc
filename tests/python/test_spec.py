@@ -185,3 +185,74 @@ def test_skill_load_zero_specs(tmp_path: Path):
     proc = run(repo, "skill", "load")
     assert proc.returncode == 0
     assert "spec_count: 0" in proc.stdout
+
+
+def test_spec_check_all_ready(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
+    base = repo / "doc" / "arch" / "specs" / "001"
+    doc = _fill_sections((base / "dev-doc.md").read_text())
+    (base / "dev-doc.md").write_text(doc)
+    run(repo, "spec", "formalize", "001", "--type", "all")
+
+    proc = run(repo, "spec", "check")
+    assert proc.returncode == 0
+    assert "就绪" in proc.stdout
+
+
+def test_spec_check_empty_dev_doc_sections(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
+
+    proc = run(repo, "spec", "check")
+    assert proc.returncode == 1
+    assert "dev-doc.md" in proc.stdout
+    assert "未完成" in proc.stdout
+
+
+def test_spec_check_skeleton_formal_files(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
+    base = repo / "doc" / "arch" / "specs" / "001"
+    doc = _fill_sections((base / "dev-doc.md").read_text())
+    (base / "dev-doc.md").write_text(doc)
+    # formal files not generated — still skeleton
+
+    proc = run(repo, "spec", "check")
+    assert proc.returncode == 1
+    assert "形式化文件未生成" in proc.stdout
+
+
+def test_commit_blocks_on_incomplete_specs(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "main.py").write_text("print('test')")
+    import subprocess
+    subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
+
+    run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
+    # dev-doc still "待补充", formal files still skeleton
+
+    proc = run(repo, "commit")
+    assert proc.returncode == 1
+    assert "Spec 就绪检查" in proc.stdout
+    assert "未通过" in proc.stdout
+
+
+def test_commit_passes_with_ready_specs(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "main.py").write_text("print('test')")
+    import subprocess
+    subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
+
+    run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
+    base = repo / "doc" / "arch" / "specs" / "001"
+    doc = _fill_sections((base / "dev-doc.md").read_text())
+    (base / "dev-doc.md").write_text(doc)
+    run(repo, "spec", "formalize", "001", "--type", "all")
+
+    proc = run(repo, "commit")
+    assert proc.returncode == 0
+    assert "AUDIT SUBAGENT PROMPT" in proc.stdout
+    assert "Spec-001" in proc.stdout
