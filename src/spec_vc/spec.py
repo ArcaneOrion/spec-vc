@@ -40,6 +40,8 @@ class Spec:
     data_shape: str = ""
     behavior_rules: str = ""
     non_goals: str = ""
+    testing: str = ""
+    logging: str = ""
     references: str = ""
 
 
@@ -83,6 +85,8 @@ def parse_spec(path: Path) -> Spec:
         data_shape=extract_section(text, "数据形状"),
         behavior_rules=extract_section(text, "行为规则"),
         non_goals=extract_section(text, "非目标"),
+        testing=extract_section(text, "测试策略"),
+        logging=extract_section(text, "日志实现"),
         references=extract_section(text, "References"),
     )
 
@@ -215,7 +219,46 @@ def _is_formal_skeleton(filepath: Path, formal_type: str) -> bool:
     return False
 
 
-_SECTIONS_TO_CHECK = ["概述", "接口契约", "数据形状", "行为规则"]
+_SECTIONS_TO_CHECK = ["概述", "接口契约", "数据形状", "行为规则", "测试策略", "日志实现"]
+
+# 占位内容模式：匹配 HTML 注释指令、空表格行、纯空白
+_PLACEHOLDER_RE = re.compile(
+    r"^\s*(<!--.*?-->)?\s*$", re.MULTILINE
+)
+_EMPTY_TABLE_ROW_RE = re.compile(
+    r"^\s*\|(\s*\|)+\s*$", re.MULTILINE
+)
+_SECTION_HEADER_RE = re.compile(
+    r"^\s*#{2,4}\s+.*$", re.MULTILINE
+)
+_TABLE_HEADER_RE = re.compile(
+    r"^\s*\|[^|]+\|[^|]+\|.*$", re.MULTILINE
+)
+# 匹配模板结构行：加粗标签行、带格式的列表项
+_TEMPLATE_STRUCTURE_RE = re.compile(
+    r"^\s*(?:\*\*[^*]+\*\*:?\s*$|- \*\*[^*]+\*\*:?.*$)\s*$",
+    re.MULTILINE,
+)
+
+
+def _is_section_placeholder(content: str) -> bool:
+    """检测区块内容是否仍为模板占位符（未被实际填写）。"""
+    stripped = content.strip()
+    if not stripped or stripped == "待补充":
+        return True
+    # 移除 HTML 注释、空表格行、子节标题、表头行、模板结构行
+    cleaned = _PLACEHOLDER_RE.sub("", stripped)
+    cleaned = _EMPTY_TABLE_ROW_RE.sub("", cleaned)
+    cleaned = _SECTION_HEADER_RE.sub("", cleaned)
+    cleaned = _TABLE_HEADER_RE.sub("", cleaned)
+    cleaned = _TEMPLATE_STRUCTURE_RE.sub("", cleaned)
+    cleaned = cleaned.strip()
+    # 如果清理后只剩下表头分隔行（如 |---|---|），视为未填写
+    cleaned = re.sub(r"^\s*\|[-:|\s]+\|\s*$", "", cleaned, flags=re.MULTILINE).strip()
+    # 如果清理后没有实质内容，视为未填写
+    if not cleaned:
+        return True
+    return False
 
 
 def check_spec_readiness(specs_root: Path) -> list[SpecReadinessIssue]:
@@ -228,7 +271,7 @@ def check_spec_readiness(specs_root: Path) -> list[SpecReadinessIssue]:
 
         for section_name in _SECTIONS_TO_CHECK:
             content = extract_section(text, section_name)
-            if not content.strip() or content.strip() == "待补充":
+            if _is_section_placeholder(content):
                 issues.append(
                     SpecReadinessIssue(
                         spec_id=spec.spec_id,
@@ -281,9 +324,29 @@ def formalize_spec(
 
     fname, content = formal_map[formal_type]
     out_path = basedir / fname
-    if not content.strip() or content.strip() == "待补充":
+    if _is_section_placeholder(content):
         raise ValidationError(
             f"Spec-{spec_id} 的对应区块为空（待补充），无法生成形式化文件"
         )
     out_path.write_text(content.strip() + "\n")
     return out_path
+
+
+def read_spec_full(specs_root: Path, spec_id: str) -> str:
+    """读取 Spec 的完整内容（dev-doc.md + 所有形式化文件），用于 show 命令。"""
+    basedir = spec_basedir(specs_root, spec_id)
+    doc_path = basedir / "dev-doc.md"
+    if not doc_path.exists():
+        raise ValidationError(f"Spec 不存在: Spec-{spec_id}")
+
+    parts: list[str] = []
+    parts.append(doc_path.read_text())
+
+    formal_files = ["contract.openapi.yaml", "schema.json", "behavior.feature"]
+    for fname in formal_files:
+        fpath = basedir / fname
+        if fpath.exists() and fpath.stat().st_size > 0:
+            parts.append(f"\n---\n\n## {fname}\n")
+            parts.append(fpath.read_text())
+
+    return "\n".join(parts)

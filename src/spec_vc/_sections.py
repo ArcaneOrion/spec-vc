@@ -17,7 +17,7 @@ def _section_pattern(name: str) -> str:
 def extract_section(text: str, section_name: str) -> str:
     pattern = _section_pattern(section_name)
     compiled = re.compile(
-        rf"({pattern})\n\n(.*?)(?=\n## |\Z)",
+        rf"({pattern}\n(?:<!--.*?-->\n)*\n)(.*?)(?=\n## |\Z)",
         re.S,
     )
     match = compiled.search(text)
@@ -29,10 +29,10 @@ def extract_section(text: str, section_name: str) -> str:
 def replace_section(text: str, section_name: str, body: str) -> str:
     pattern = _section_pattern(section_name)
     compiled = re.compile(
-        rf"({pattern})\n\n(.*?)(?=\n## |\Z)",
+        rf"({pattern}\n(?:<!--.*?-->\n)*\n)(.*?)(?=\n## |\Z)",
         re.S,
     )
-    replacement = rf"\1\n\n{body.strip()}\n\n"
+    replacement = rf"\1{body.strip()}\n\n"
     if not compiled.search(text):
         raise ValidationError(f"计划文件缺少区块: {section_name}")
     return compiled.sub(replacement, text, count=1)

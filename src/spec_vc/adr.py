@@ -107,3 +107,11 @@ def exemption_allows(config: Config, staged_files: list[str], changed_lines: int
         if not suffix_ok and not path_ok:
             return False, f"文件不在允许豁免范围内: {path}"
     return True, None
+
+
+def read_adr_content(adr_dir: Path, adr_id: str) -> str:
+    """读取 ADR 文件内容，用于 show 命令。"""
+    path = adr_dir / f"adr-{adr_id}.md"
+    if not path.exists():
+        raise ValidationError(f"ADR 不存在: ADR-{adr_id}")
+    return path.read_text()

@@ -238,14 +238,18 @@ def test_change_validate_pre_passes_with_ready_specs(tmp_path: Path):
     # 填写 dev-doc
     base = repo / 'doc' / 'arch' / 'specs' / '001'
     doc = (base / 'dev-doc.md').read_text()
-    sections = [
-        ('## 概述\n\n待补充', '## 概述\n\n认证模块接口规格。'),
-        ('## 接口契约\n\n待补充', '## 接口契约\n\n```yaml\nPOST /login\n```'),
-        ('## 数据形状\n\n待补充', '## 数据形状\n\nJWT RS256 签名。'),
-        ('## 行为规则\n\n待补充', '## 行为规则\n\nFeature: 连续失败锁定\n'),
-    ]
-    for old, new in sections:
-        doc = doc.replace(old, new)
+    import re as _re
+
+    def _replace_sec(text: str, name: str, body: str) -> str:
+        pat = _re.compile(rf"(## {_re.escape(name)}\n(?:<!--.*?-->\n)*\n)(.*?)(?=\n## |\Z)", _re.S)
+        return pat.sub(rf"\1{body}\n\n", text, count=1)
+
+    doc = _replace_sec(doc, "概述", "认证模块接口规格。")
+    doc = _replace_sec(doc, "接口契约", "```yaml\nPOST /login\n```")
+    doc = _replace_sec(doc, "数据形状", "JWT RS256 签名。")
+    doc = _replace_sec(doc, "行为规则", "Feature: 连续失败锁定\n\nScenario: 失败计数器")
+    doc = _replace_sec(doc, "测试策略", "验收标准: 登录成功返回 200。")
+    doc = _replace_sec(doc, "日志实现", "INFO 级别记录登录事件，包含 user_id 和 trace_id。")
     (base / 'dev-doc.md').write_text(doc)
     run(repo, 'spec', 'formalize', '001', '--type', 'all')
 

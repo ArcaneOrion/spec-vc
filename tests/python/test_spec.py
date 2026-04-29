@@ -117,14 +117,23 @@ def test_spec_id_increments(tmp_path: Path):
 
 def _fill_sections(doc: str) -> str:
     """Replace section placeholders with targetable content."""
-    sections = [
-        ("## 概述\n\n待补充", "## 概述\n\n认证模块的接口规格。"),
-        ("## 接口契约\n\n待补充", "## 接口契约\n\n```yaml\nPOST /login:\n  request:\n    username: string\n```"),
-        ("## 数据形状\n\n待补充", "## 数据形状\n\nToken 使用 JWT RS256 签名。"),
-        ("## 行为规则\n\n待补充", "## 行为规则\n\nFeature: 连续失败 3 次锁定账户"),
-    ]
-    for old, new in sections:
-        doc = doc.replace(old, new)
+    import re
+
+    # Helper: replace the body of a ## section
+    # Handles both old ("待补充") and new (HTML comments + tables) template formats
+    def _replace_section(text: str, name: str, body: str) -> str:
+        # Match: ## name\n  optionally followed by comment line(s)  then blank line
+        pattern = re.compile(
+            rf"(## {re.escape(name)}\n(?:<!--.*?-->\n)*\n)(.*?)(?=\n## |\Z)", re.S
+        )
+        return pattern.sub(rf"\1{body}\n\n", text, count=1)
+
+    doc = _replace_section(doc, "概述", "认证模块的接口规格，覆盖登录和 Token 刷新。")
+    doc = _replace_section(doc, "接口契约", "```yaml\nPOST /login:\n  request:\n    username: string\n```")
+    doc = _replace_section(doc, "数据形状", "Token 使用 JWT RS256 签名。")
+    doc = _replace_section(doc, "行为规则", "Feature: 连续失败 3 次锁定账户\n\nScenario: 失败计数器")
+    doc = _replace_section(doc, "测试策略", "验收标准: 登录成功返回 200。")
+    doc = _replace_section(doc, "日志实现", "INFO 级别记录登录事件，包含 user_id 和 trace_id。")
     return doc
 
 
@@ -145,6 +154,15 @@ def test_spec_formalize_extracts_openapi(tmp_path: Path):
 def test_spec_formalize_rejects_empty_section(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
+    # 新模板有结构化占位内容，需显式清空区块来测试拒绝逻辑
+    base = repo / "doc" / "arch" / "specs" / "001"
+    doc = (base / "dev-doc.md").read_text()
+    import re as _re
+    def _clear_sec(text: str, name: str) -> str:
+        pat = _re.compile(rf"(## {_re.escape(name)}\n(?:<!--.*?-->\n)*\n)(.*?)(?=\n## |\Z)", _re.S)
+        return pat.sub(r"\1待补充\n\n", text, count=1)
+    doc = _clear_sec(doc, "接口契约")
+    (base / "dev-doc.md").write_text(doc)
     proc = run(repo, "spec", "formalize", "001", "--type", "openapi")
     assert proc.returncode != 0
     assert "无法生成" in proc.stderr

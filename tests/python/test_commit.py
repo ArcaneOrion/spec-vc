@@ -119,6 +119,14 @@ GET /test:
 
 无
 
+## 测试策略
+
+验收标准: GET /test 返回 200。
+
+## 日志实现
+
+INFO 级别记录请求事件。
+
 ## References
 
 - **ADR**: ADR-000

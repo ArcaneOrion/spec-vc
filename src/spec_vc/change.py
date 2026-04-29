@@ -448,3 +448,39 @@ def change_context(adr_dir: Path) -> dict[str, object]:
         "recent_adrs": recent,
         "plans_dir": plans_dir(adr_dir),
     }
+
+
+def read_plan_content(adr_dir: Path, plan_id: str | None = None) -> str:
+    """读取 Plan 文件内容，用于 show 命令。
+
+    如果 plan_id 为 None，读取当前活跃变更的 plan。
+    """
+    if plan_id is None:
+        active = load_active(adr_dir)
+        if active is None:
+            raise UsageError("当前没有 active change")
+        path = plan_path(adr_dir, active)
+    else:
+        # plan_id 格式: ADR-NNN-plan-NNN
+        path = plans_dir(adr_dir) / f"{plan_id}.md"
+    if not path.exists():
+        raise UsageError(f"计划文件不存在: {path}")
+    return path.read_text()
+
+
+def read_active_change_context(adr_dir: Path) -> str:
+    """读取当前活跃变更的完整上下文（active + plan），用于 show change 命令。"""
+    active = load_active(adr_dir)
+    if active is None:
+        raise UsageError("当前没有 active change")
+
+    parts: list[str] = []
+    parts.append(render_active(active))
+    parts.append("")
+
+    plan = plan_path(adr_dir, active)
+    if plan.exists():
+        parts.append("---\n")
+        parts.append(plan.read_text())
+
+    return "\n".join(parts)

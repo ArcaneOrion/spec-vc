@@ -8,7 +8,7 @@ import re
 import sys
 
 from ._sections import validate_title
-from .adr import list_adrs, next_adr_id, render_adr
+from .adr import list_adrs, next_adr_id, render_adr, read_adr_content
 from .adr import parse_adr as parse_adr_file
 from .adr import ensure_referenceable as ensure_adr_referenceable
 from .change import (
@@ -21,6 +21,8 @@ from .change import (
     plan_path,
     record_validation,
     clarify_plan,
+    read_plan_content,
+    read_active_change_context,
 )
 from .config import load_config
 from .errors import SpecVCError, UsageError
@@ -45,6 +47,7 @@ from .spec import (
     list_formal_files,
     list_specs,
     next_spec_id,
+    read_spec_full,
     specs_root as get_specs_root,
     validate_title as validate_spec_title,
 )
@@ -552,6 +555,45 @@ def cmd_hook_prepare_commit_msg(args: argparse.Namespace) -> int:
     return run_prepare_commit_msg(Path(args.message_file), args.source or "", args.sha or "")
 
 
+def cmd_show_adr(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
+    adr_id = args.id.replace("ADR-", "").zfill(3)
+    content = read_adr_content(adr_dir, adr_id)
+    print(content)
+    return 0
+
+
+def cmd_show_plan(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
+    plan_id = args.plan_id if hasattr(args, "plan_id") and args.plan_id else None
+    content = read_plan_content(adr_dir, plan_id)
+    print(content)
+    return 0
+
+
+def cmd_show_spec(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    specs_root = get_specs_root(repo_root, config.spec.dir)
+    spec_id = args.id.replace("Spec-", "").zfill(3)
+    content = read_spec_full(specs_root, spec_id)
+    print(content)
+    return 0
+
+
+def cmd_show_change(_args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
+    content = read_active_change_context(adr_dir)
+    print(content)
+    return 0
+
+
 def cmd_hook_post_tool_use(_args: argparse.Namespace) -> int:
     """Claude Code PostToolUse hook: 检测 spec-vc 关键命令，注入 plan/spec 内容到 AI 上下文。"""
 
@@ -603,6 +645,13 @@ def cmd_hook_post_tool_use(_args: argparse.Namespace) -> int:
             if active is not None:
                 output = plan_path(adr_dir, active).read_text()
                 header = "当前 Plan 文件"
+
+    # show 命令：直接使用 stdout 中的内容（CLI 已经输出了）
+    elif " show " in command:
+        if stdout.strip():
+            # show 命令的输出已经在 stdout 中，AI 可以直接看到
+            # 这里不需要重复注入
+            pass
 
     if not output:
         return 0
@@ -704,6 +753,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     spec_check = spec_sub.add_parser("check")
     spec_check.set_defaults(func=cmd_spec_check)
+
+    show = sub.add_parser("show")
+    show_sub = show.add_subparsers(dest="show_command")
+
+    show_adr = show_sub.add_parser("adr")
+    show_adr.add_argument("id")
+    show_adr.set_defaults(func=cmd_show_adr)
+
+    show_plan = show_sub.add_parser("plan")
+    show_plan.add_argument("plan_id", nargs="?")
+    show_plan.set_defaults(func=cmd_show_plan)
+
+    show_spec = show_sub.add_parser("spec")
+    show_spec.add_argument("id")
+    show_spec.set_defaults(func=cmd_show_spec)
+
+    show_change = show_sub.add_parser("change")
+    show_change.set_defaults(func=cmd_show_change)
 
     commit = sub.add_parser("commit")
     commit.add_argument("--format", choices=["json", "text"], default="json")
