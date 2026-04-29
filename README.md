@@ -92,7 +92,7 @@ close：回填 ADR 摘要，关闭变更
 ### 安装
 
 ```bash
-git clone <repo-url> ~/.claude/skills/spec-vc
+git clone https://github.com/ArcaneOrion/spec-vc.git ~/.claude/skills/spec-vc
 cd ~/.claude/skills/spec-vc
 uv sync
 ```

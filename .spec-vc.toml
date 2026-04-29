@@ -8,6 +8,7 @@ allowed_paths = ["README.md", "docs/**", ".github/**", "doc/**"]
 blocked_paths = ["src/**", "lib/**", "core/**", "hooks/**", "scripts/**"]
 allowed_extensions = [".md", ".txt", ".rst", ".gitignore"]
 max_changed_lines = 40
+doc_max_changed_lines = 500
 
 [adr_required]
 code_paths = ["src/**", "lib/**", "core/**", "api/**", "server/**", "backend/**", "frontend/**"]

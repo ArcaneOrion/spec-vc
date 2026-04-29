@@ -91,8 +91,14 @@ def match_any(path: str, patterns: list[str]) -> bool:
 def exemption_allows(config: Config, staged_files: list[str], changed_lines: int) -> tuple[bool, str | None]:
     if not config.exemption.enabled:
         return False, "[ADR-none] 已被禁用"
-    if changed_lines > config.exemption.max_changed_lines:
-        return False, f"改动行数 {changed_lines} 超过豁免阈值 {config.exemption.max_changed_lines}"
+    # 判断是否所有 staged 文件都在文档路径内
+    all_doc = all(
+        match_any(p, config.exemption.allowed_paths) or any(p.endswith(ext) for ext in config.exemption.allowed_extensions)
+        for p in staged_files
+    )
+    threshold = config.exemption.doc_max_changed_lines if all_doc else config.exemption.max_changed_lines
+    if changed_lines > threshold:
+        return False, f"改动行数 {changed_lines} 超过豁免阈值 {threshold}"
     for path in staged_files:
         if match_any(path, config.exemption.blocked_paths):
             return False, f"命中禁止豁免路径: {path}"

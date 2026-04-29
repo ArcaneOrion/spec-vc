@@ -13,6 +13,7 @@ class ExemptionConfig:
     blocked_paths: list[str] = field(default_factory=lambda: ["src/**", "lib/**", "core/**"])
     allowed_extensions: list[str] = field(default_factory=lambda: [".md", ".txt", ".rst", ".gitignore"])
     max_changed_lines: int = 40
+    doc_max_changed_lines: int = 500
 
 
 @dataclass(slots=True)
@@ -59,6 +60,7 @@ def load_config(repo_root: Path) -> Config:
         config.exemption.blocked_paths = list(exemption.get("blocked_paths", config.exemption.blocked_paths))
         config.exemption.allowed_extensions = list(exemption.get("allowed_extensions", config.exemption.allowed_extensions))
         config.exemption.max_changed_lines = int(exemption.get("max_changed_lines", config.exemption.max_changed_lines))
+        config.exemption.doc_max_changed_lines = int(exemption.get("doc_max_changed_lines", config.exemption.doc_max_changed_lines))
         config.adr_required.code_paths = list(adr_required.get("code_paths", config.adr_required.code_paths))
         config.adr_required.doc_only_paths = list(adr_required.get("doc_only_paths", config.adr_required.doc_only_paths))
         config.adr_required.doc_only_extensions = list(adr_required.get("doc_only_extensions", config.adr_required.doc_only_extensions))
