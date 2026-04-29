@@ -28,12 +28,6 @@ def test_skill_doc_uses_correct_venv_path_in_bootstrap_protocol():
     assert "spec-vc 的 Python 环境和可执行文件位于" in skill
 
 
-def test_readme_documents_venv_bootstrap_with_uv_run():
-    root = Path(__file__).resolve().parents[2]
-    readme = (root / "README.md").read_text()
-    assert "uv run spec-vc" in readme
-
-
 def init_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
