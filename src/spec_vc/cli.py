@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from datetime import date
 from pathlib import Path
+import json
+import re
 import sys
 
 from ._sections import validate_title
@@ -16,6 +18,7 @@ from .change import (
     infer_adr_required,
     load_active,
     next_question,
+    plan_path,
     record_validation,
     clarify_plan,
 )
@@ -78,7 +81,45 @@ def _run_uv_sync(project_root: Path) -> None:
         raise UsageError(f"环境安装失败: {msg}")
 
 
-def cmd_adr_init(args: argparse.Namespace) -> int:
+def _init_claude_hook(repo_root: Path) -> Path | None:
+    """写入/合并 PostToolUse hook 到目标项目的 .claude/settings.json。"""
+    claude_dir = repo_root / ".claude"
+    settings_path = claude_dir / "settings.json"
+
+    hook_entry = {
+        "matcher": "Bash",
+        "hooks": [{
+            "type": "command",
+            "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use"
+        }]
+    }
+
+    if settings_path.exists():
+        try:
+            existing = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            raise UsageError(
+                f".claude/settings.json 格式损坏，请手动修复后重试: {settings_path}"
+            )
+        existing_hooks = existing.get("hooks", {})
+        existing_post = existing_hooks.get("PostToolUse", [])
+        for entry in existing_post:
+            if entry.get("matcher") == "Bash":
+                for h in entry.get("hooks", []):
+                    if "spec-vc hook post-tool-use" in h.get("command", ""):
+                        return None
+        existing.setdefault("hooks", {}).setdefault("PostToolUse", []).append(hook_entry)
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n")
+    else:
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        hook_config = {"hooks": {"PostToolUse": [hook_entry]}}
+        settings_path.write_text(json.dumps(hook_config, ensure_ascii=False, indent=2) + "\n")
+
+    return settings_path
+
+
+def cmd_init(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     project_root = skill_root()
 
@@ -107,6 +148,8 @@ def cmd_adr_init(args: argparse.Namespace) -> int:
     commit_hook = _install_hook(repo_root, "commit-msg")
     run_git(repo_root, "config", "commit.template", str(template_path("commit-msg")))
 
+    claude_settings = _init_claude_hook(repo_root)
+
     venv_path = project_root / ".venv"
     print("✅ spec-vc 初始化成功")
     print("  - uv sync (环境已安装)" if venv_path.exists() else "  - uv sync (已完成)")
@@ -117,6 +160,20 @@ def cmd_adr_init(args: argparse.Namespace) -> int:
     print(f"  - {prepare_hook.relative_to(repo_root)}")
     print(f"  - {commit_hook.relative_to(repo_root)}")
     print("  - git config commit.template (已配置)")
+    if claude_settings:
+        print(f"  - {claude_settings.relative_to(repo_root)} (PostToolUse hook)")
+    return 0
+
+
+def cmd_adr_show(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
+    adr_id = args.id.replace("ADR-", "").zfill(3)
+    adr_path = adr_dir / f"adr-{adr_id}.md"
+    if not adr_path.exists():
+        raise UsageError(f"ADR 不存在: ADR-{adr_id}")
+    print(adr_path.read_text())
     return 0
 
 
@@ -253,6 +310,18 @@ def cmd_change_show_active(_args: argparse.Namespace) -> int:
         print("no active change")
         return 0
     print(f"ADR-{active.adr_id} {active.stage} {active.plan_path}")
+    return 0
+
+
+def cmd_change_show(_args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
+    active = load_active(adr_dir)
+    if active is None:
+        raise UsageError("当前没有 active change")
+    path = plan_path(adr_dir, active)
+    print(path.read_text())
     return 0
 
 
@@ -421,11 +490,17 @@ def cmd_spec_show(args: argparse.Namespace) -> int:
     print(doc_path.read_text())
     formal = list_formal_files(specs_root, spec_id)
     if formal:
-        print("---")
-        print("形式化文件:")
-        for fname in formal:
-            fpath = specs_root / spec_id / fname
-            print(f"  [{fname}] ({fpath.stat().st_size} bytes)")
+        if args.formal:
+            for fname in formal:
+                fpath = specs_root / spec_id / fname
+                print(f"\n--- [{fname}] ---")
+                print(fpath.read_text())
+        else:
+            print("---")
+            print("形式化文件:")
+            for fname in formal:
+                fpath = specs_root / spec_id / fname
+                print(f"  [{fname}] ({fpath.stat().st_size} bytes)")
     else:
         print("---")
         print("(尚无形式化文件)")
@@ -477,20 +552,79 @@ def cmd_hook_prepare_commit_msg(args: argparse.Namespace) -> int:
     return run_prepare_commit_msg(Path(args.message_file), args.source or "", args.sha or "")
 
 
+def cmd_hook_post_tool_use(_args: argparse.Namespace) -> int:
+    """Claude Code PostToolUse hook: 检测 spec-vc 关键命令，注入 plan/spec 内容到 AI 上下文。"""
+
+    try:
+        data = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+
+    if data.get("tool_name") != "Bash":
+        return 0
+
+    command = data.get("tool_input", {}).get("command", "")
+    stdout = data.get("tool_output", "")
+
+    repo_root = _repo_root()
+    cfg = load_config(repo_root)
+    adr_dir = repo_root / cfg.project.adr_dir
+
+    output: str = ""
+    header: str = ""
+
+    # change clarify 完成（无 missing 字段）
+    if "change clarify" in command and "--motivation" in command:
+        if "missing:" not in stdout:
+            active = load_active(adr_dir)
+            if active is not None:
+                output = plan_path(adr_dir, active).read_text()
+                header = "当前 Plan 文件"
+
+    # spec formalize 完成
+    elif "spec formalize" in command and "--type" in command:
+        m = re.search(r"formalize\s+(\S+)", command)
+        if m:
+            spec_id = m.group(1).replace("Spec-", "").zfill(3)
+            specs_root = get_specs_root(repo_root, cfg.spec.dir)
+            doc_path = specs_root / spec_id / "dev-doc.md"
+            if doc_path.exists():
+                output = doc_path.read_text()
+                for fname in list_formal_files(specs_root, spec_id):
+                    fpath = specs_root / spec_id / fname
+                    output += f"\n\n--- [{fname}] ---\n"
+                    output += fpath.read_text()
+                header = f"当前 Spec-{spec_id} 文件"
+
+    # change start 完成
+    elif "change start" in command and "--adr" in command:
+        if "ADR-" in stdout and "plan-" in stdout:
+            active = load_active(adr_dir)
+            if active is not None:
+                output = plan_path(adr_dir, active).read_text()
+                header = "当前 Plan 文件"
+
+    if not output:
+        return 0
+
+    print("\n" + "=" * 60)
+    print(f"[spec-vc]  以下是最新{header}内容，请展示给用户：")
+    print("=" * 60 + "\n")
+    print(output)
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spec-vc")
     sub = parser.add_subparsers(dest="command")
 
     init = sub.add_parser("init")
     init.add_argument("--seed", action=argparse.BooleanOptionalAction, default=True)
-    init.set_defaults(func=cmd_adr_init)
+    init.set_defaults(func=cmd_init)
 
     adr = sub.add_parser("adr")
     adr_sub = adr.add_subparsers(dest="adr_command")
-
-    adr_init = adr_sub.add_parser("init")
-    adr_init.add_argument("--seed", action=argparse.BooleanOptionalAction, default=True)
-    adr_init.set_defaults(func=cmd_adr_init)
 
     adr_list = adr_sub.add_parser("list")
     adr_list.set_defaults(func=cmd_adr_list)
@@ -502,6 +636,10 @@ def build_parser() -> argparse.ArgumentParser:
     adr_status = adr_sub.add_parser("status")
     adr_status.add_argument("--rev-range")
     adr_status.set_defaults(func=cmd_adr_status)
+
+    adr_show = adr_sub.add_parser("show")
+    adr_show.add_argument("id")
+    adr_show.set_defaults(func=cmd_adr_show)
 
     change = sub.add_parser("change")
     change_sub = change.add_subparsers(dest="change_command")
@@ -540,6 +678,9 @@ def build_parser() -> argparse.ArgumentParser:
     change_close.add_argument("--summary", required=True)
     change_close.set_defaults(func=cmd_change_close)
 
+    change_show = change_sub.add_parser("show")
+    change_show.set_defaults(func=cmd_change_show)
+
     spec = sub.add_parser("spec")
     spec_sub = spec.add_subparsers(dest="spec_command")
 
@@ -553,6 +694,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     spec_show = spec_sub.add_parser("show")
     spec_show.add_argument("id")
+    spec_show.add_argument("--formal", action="store_true")
     spec_show.set_defaults(func=cmd_spec_show)
 
     spec_formalize = spec_sub.add_parser("formalize")
@@ -593,6 +735,9 @@ def build_parser() -> argparse.ArgumentParser:
     hook_prepare.add_argument("source", nargs="?")
     hook_prepare.add_argument("sha", nargs="?")
     hook_prepare.set_defaults(func=cmd_hook_prepare_commit_msg)
+
+    hook_post_tool = hook_sub.add_parser("post-tool-use")
+    hook_post_tool.set_defaults(func=cmd_hook_post_tool_use)
 
     return parser
 

@@ -260,3 +260,42 @@ def test_commit_passes_with_ready_specs(tmp_path: Path):
     assert len(manifest["audit_units"]) == 1
     assert manifest["audit_units"][0]["spec_id"] == "001"
     assert "Spec-001" in proc.stderr
+
+
+def test_adr_show_displays_content(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    proc = run(repo, "adr", "show", "000")
+    assert proc.returncode == 0
+    assert "ADR-000" in proc.stdout
+    assert "采用 ADR 方法论" in proc.stdout
+
+
+def test_adr_show_rejects_nonexistent(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    proc = run(repo, "adr", "show", "999")
+    assert proc.returncode != 0
+    assert "ADR-999" in proc.stderr
+
+
+def test_adr_show_accepts_adr_prefix(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    proc = run(repo, "adr", "show", "ADR-000")
+    assert proc.returncode == 0
+    assert "ADR-000" in proc.stdout
+
+
+def test_spec_show_formal_displays_content(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
+    base = repo / "doc" / "arch" / "specs" / "001"
+    doc = _fill_sections((base / "dev-doc.md").read_text())
+    (base / "dev-doc.md").write_text(doc)
+    run(repo, "spec", "formalize", "001", "--type", "all")
+
+    proc = run(repo, "spec", "show", "001", "--formal")
+    assert proc.returncode == 0
+    assert "用户认证" in proc.stdout
+    assert "[contract.openapi.yaml]" in proc.stdout
+    assert "[schema.json]" in proc.stdout
+    assert "[behavior.feature]" in proc.stdout
+    assert "POST /login" in proc.stdout

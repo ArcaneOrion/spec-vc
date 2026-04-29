@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+import json
 import os
 
 
@@ -70,6 +71,9 @@ def test_init_bootstraps_repo(tmp_path: Path):
     assert (repo / ".git" / "hooks" / "commit-msg").stat().st_mode & 0o111
     commit_template = subprocess.run(["git", "config", "commit.template"], cwd=repo, text=True, capture_output=True, check=True)
     assert commit_template.stdout.strip().endswith("templates/commit-msg")
+    assert (repo / ".claude" / "settings.json").exists()
+    settings = json.loads((repo / ".claude" / "settings.json").read_text())
+    assert "PostToolUse" in settings.get("hooks", {})
 
 
 def test_init_runs_uv_sync(tmp_path: Path):
@@ -81,9 +85,9 @@ def test_init_runs_uv_sync(tmp_path: Path):
 
 
 
-def test_adr_init_supports_no_seed(tmp_path: Path):
+def test_init_supports_no_seed(tmp_path: Path):
     repo = init_empty_repo(tmp_path)
-    proc = run(repo, "adr", "init", "--no-seed", check=True)
+    proc = run(repo, "init", "--no-seed", check=True)
     assert "spec-vc 初始化成功" in proc.stdout
     assert (repo / ".spec-vc.toml").exists()
     assert (repo / "doc" / "arch" / "README.md").exists()
@@ -171,3 +175,54 @@ def test_status_fails_on_invalid_rev_range(tmp_path: Path):
     proc = run(repo, "adr", "status", "--rev-range", "missing..HEAD")
     assert proc.returncode != 0
     assert "failed" in proc.stderr or "unknown revision" in proc.stderr or "bad revision" in proc.stderr
+
+
+def test_init_merges_existing_claude_settings(tmp_path: Path):
+    repo = init_empty_repo(tmp_path)
+    claude_dir = repo / ".claude"
+    claude_dir.mkdir()
+    existing = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo existing"}]}]}}
+    (claude_dir / "settings.json").write_text(json.dumps(existing))
+    run(repo, "init", check=True)
+    merged = json.loads((claude_dir / "settings.json").read_text())
+    assert "PreToolUse" in merged["hooks"]
+    assert "PostToolUse" in merged["hooks"]
+    assert any("spec-vc hook post-tool-use" in h.get("command", "") for entry in merged["hooks"]["PostToolUse"] for h in entry.get("hooks", []))
+
+
+def test_post_tool_use_hook_detects_clarify(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, "change", "start", "--adr", "000", "--summary", "重构 CLI")
+    run(repo, "change", "clarify",
+        "--motivation", "简化命名",
+        "--boundary", "只改名不改功能",
+        "--design", "无架构变更",
+        "--implementation", "rename cmd_adr_init to cmd_init",
+        "--verification", "单元测试覆盖",
+        "--rollback", "git revert")
+    hook_input = json.dumps({
+        "tool_name": "Bash",
+        "tool_input": {"command": "spec-vc change clarify --motivation 简化命名 ..."},
+        "tool_output": "doc/arch/plans/ADR-000-plan-001.md\n"
+    })
+    proc = subprocess.run(
+        ["uv", "run", "spec-vc", "hook", "post-tool-use"],
+        input=hook_input, text=True, capture_output=True, cwd=repo, env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
+    )
+    assert proc.returncode == 0
+    assert "ADR-000 执行方案" in proc.stdout
+
+
+def test_post_tool_use_hook_ignores_irrelevant(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    hook_input = json.dumps({
+        "tool_name": "Bash",
+        "tool_input": {"command": "pytest tests/ -v"},
+        "tool_output": "82 passed"
+    })
+    proc = subprocess.run(
+        ["uv", "run", "spec-vc", "hook", "post-tool-use"],
+        input=hook_input, text=True, capture_output=True, cwd=repo, env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
+    )
+    assert proc.returncode == 0
+    assert "ADR-000" not in proc.stdout

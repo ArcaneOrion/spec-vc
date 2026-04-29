@@ -253,3 +253,20 @@ def test_change_validate_pre_passes_with_ready_specs(tmp_path: Path):
     assert proc.returncode == 0
     plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
     assert '- **Stage**: implement-ready' in plan
+
+
+def test_change_show_displays_plan_content(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '重构 CLI')
+    proc = run(repo, 'change', 'show')
+    assert proc.returncode == 0
+    assert 'ADR-000 执行方案' in proc.stdout
+    assert '重构 CLI' in proc.stdout
+    assert '## Motivation and Context' in proc.stdout
+
+
+def test_change_show_rejects_no_active(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    proc = run(repo, 'change', 'show')
+    assert proc.returncode != 0
+    assert '当前没有 active change' in proc.stderr
