@@ -126,6 +126,30 @@ def test_change_clarify_updates_plan_when_complete(tmp_path: Path):
     assert 'missing: ' not in question.stdout  # all fields filled, no missing
 
 
+def test_change_clarify_accepts_digit_prefixed_body(tmp_path: Path):
+    """字段值以数字开头时不应触发 re.sub group reference 误解析。
+
+    Regression: replace_section 用 rf'\\1{body}' 作 replacement，body 以数字开头时
+    \\1 + '1' 被解读为 \\11，触发 invalid group reference 11。
+    """
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '回归测试')
+    proc = run(
+        repo,
+        'change', 'clarify',
+        '--motivation', '1) 数字开头的动机文本',
+        '--boundary', '2) 数字开头的边界',
+        '--design', '3) 数字开头的设计',
+        '--implementation', '1) 第一步 2) 第二步',
+        '--verification', '4) 数字开头的验证',
+        '--rollback', '5) 数字开头的回滚',
+    )
+    assert proc.returncode == 0, f"clarify 应在数字开头时正常完成, stderr={proc.stderr}"
+    plan = (repo / 'doc' / 'arch' / 'plans' / 'ADR-000-plan-001.md').read_text()
+    assert '1) 数字开头的动机文本' in plan
+    assert '1) 第一步 2) 第二步' in plan
+
+
 def test_change_validate_writes_pre_and_post(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')

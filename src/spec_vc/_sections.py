@@ -32,7 +32,7 @@ def replace_section(text: str, section_name: str, body: str) -> str:
         rf"({pattern}\n(?:<!--.*?-->\n)*\n)(.*?)(?=\n## |\Z)",
         re.S,
     )
-    replacement = rf"\1{body.strip()}\n\n"
+    replacement = rf"\g<1>{body.strip()}\n\n"
     if not compiled.search(text):
         raise ValidationError(f"计划文件缺少区块: {section_name}")
     return compiled.sub(replacement, text, count=1)
