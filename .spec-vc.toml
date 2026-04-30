@@ -4,7 +4,7 @@ strict = true
 
 [exemption]
 enabled = true
-allowed_paths = ["README.md", "docs/**", ".github/**", "doc/**"]
+allowed_paths = ["README.md", "LICENSE", "docs/**", ".github/**", "doc/**"]
 blocked_paths = ["src/**", "lib/**", "core/**", "hooks/**", "scripts/**"]
 allowed_extensions = [".md", ".txt", ".rst", ".gitignore"]
 max_changed_lines = 40
