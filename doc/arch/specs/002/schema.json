@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ADR-007 emergency bypass data shapes",
+  "type": "object",
+  "properties": {
+    "BypassEnvironment": {
+      "type": "object",
+      "description": "触发 bypass 的环境变量约束",
+      "properties": {
+        "SPEC_VC_BYPASS": {
+          "type": "string",
+          "minLength": 1,
+          "description": "非空字符串触发 bypass。推荐值：hotfix / ci / bisect / migration / repair。空字符串等同未设置。"
+        }
+      },
+      "required": ["SPEC_VC_BYPASS"]
+    },
+    "BypassLogLine": {
+      "type": "object",
+      "description": ".git/spec-vc-bypass.log 单行格式（管道分隔）",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 时间戳"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SPEC_VC_BYPASS 环境变量原值"
+        },
+        "subject": {
+          "type": "string",
+          "description": "commit subject 行原文"
+        }
+      },
+      "required": ["timestamp", "reason", "subject"]
+    }
+  }
+}
+
+---

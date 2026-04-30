@@ -1,0 +1,35 @@
+openapi: 3.0.3
+info:
+  title: spec-vc commit-msg hook (emergency bypass extension)
+  version: "0.3.1"
+  description: |
+    git commit-msg hook 的调用契约。本契约描述 ADR-007 引入的 bypass 行为，
+    并不实际暴露 HTTP 端点——OpenAPI 在此用作行为契约的形式化载体。
+paths:
+  /commit-msg:
+    post:
+      summary: 校验 commit message 与提交通路
+      description: |
+        git 在 commit-msg 阶段调用本 hook。hook 以 commit message 文件路径
+        为参数，环境变量 SPEC_VC_BYPASS 影响校验路径。
+      parameters:
+        - in: query
+          name: SPEC_VC_BYPASS
+          description: 非空字符串触发 emergency bypass，跳过 token 校验
+          required: false
+          schema:
+            type: string
+            minLength: 1
+        - in: query
+          name: message_file_path
+          description: git 传入的 commit message 临时文件路径
+          required: true
+          schema:
+            type: string
+      responses:
+        "0":
+          description: 放行 commit（exit code 0）
+        "1":
+          description: 阻塞 commit（exit code 非 0），原因经 stderr 输出
+
+---

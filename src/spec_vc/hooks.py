@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import datetime
+import os
+import sys
 from pathlib import Path
 import re
 
@@ -13,6 +16,8 @@ from .gitops import repo_root_from, staged_diff_numstat, staged_files
 ADR_TOKEN_RE = re.compile(r"\[(ADR-none|ADR-\?+|ADR-\d{3,})\]")
 EXACT_NONE_RE = re.compile(r"\[ADR-none\]")
 EXACT_NUM_RE = re.compile(r"\[ADR-(\d{3,})\]")
+
+BYPASS_LOG_FILENAME = "spec-vc-bypass.log"
 
 
 HELP_MISSING = """[spec-vc] Commit 被阻塞:subject 必须包含且只能包含一个 [ADR-NNN] 或 [ADR-none]"""
@@ -28,16 +33,35 @@ def _extract_exact_tokens(subject: str) -> list[str]:
     return ADR_TOKEN_RE.findall(subject)
 
 
+def _try_write_bypass_log(repo_root: Path, reason: str, subject: str) -> None:
+    """ADR-007: 向 .git/spec-vc-bypass.log 追加 bypass 审计行；fail-open。"""
+    log_path = repo_root / ".git" / BYPASS_LOG_FILENAME
+    timestamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    line = f"{timestamp} | {reason} | {subject}\n"
+    try:
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError as e:
+        print(
+            f"[spec-vc] bypass 日志写入失败: {e}（commit 仍放行）",
+            file=sys.stderr,
+        )
+
+
 def run_commit_msg(message_file: Path) -> int:
     repo_root = repo_root_from(Path.cwd())
     config = load_config(repo_root)
     subject = _subject(message_file)
     tokens = _extract_exact_tokens(subject)
 
-    try:
-        validate_and_consume_token(repo_root)
-    except (FileNotFoundError, ValueError, TimeoutError) as e:
-        raise ValidationError(str(e)) from e
+    bypass_reason = os.environ.get("SPEC_VC_BYPASS", "")
+    if bypass_reason:
+        _try_write_bypass_log(repo_root, bypass_reason, subject)
+    else:
+        try:
+            validate_and_consume_token(repo_root)
+        except (FileNotFoundError, ValueError, TimeoutError) as e:
+            raise ValidationError(str(e)) from e
 
     if any(token.startswith("ADR-?") for token in tokens):
         raise ValidationError(HELP_SLOT)

@@ -41,7 +41,9 @@ def validate_and_consume_token(repo_root: Path) -> None:
     if not token_path.exists():
         raise FileNotFoundError(
             "未找到提交 token。请通过 spec-vc commit 流程提交代码，"
-            "不要直接使用 git commit。"
+            "不要直接使用 git commit。\n"
+            "紧急情况下可临时绕过（会写审计日志至 .git/spec-vc-bypass.log）：\n"
+            "  SPEC_VC_BYPASS=<原因> git commit ..."
         )
 
     content = token_path.read_text().strip()

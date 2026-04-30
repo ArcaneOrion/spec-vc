@@ -29,7 +29,8 @@
 | ADR-003 | skill 扁平化 + 命令前缀统一为 /spec-vc adr-* | Accepted | 2026-04-20 |
 | ADR-004 | init命令增加uv环境安装步骤 | Accepted | 2026-04-26 |
 | ADR-005 | 引入 Spec 结构化规格层与 subagent 审计协议 | Accepted | 2026-04-26 |
-| ADR-006 | 引入 commit token 门禁机制，强制通过 spec-vc commit 提交 | Proposed | 2026-04-27 |
+| ADR-006 | 引入 commit token 门禁机制，强制通过 spec-vc commit 提交 | Accepted | 2026-04-27 |
+| ADR-007 | 为 commit token 门禁引入 emergency bypass 机制 | Proposed | 2026-04-30 |
 
 ## 状态图例
 

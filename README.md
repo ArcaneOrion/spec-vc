@@ -134,6 +134,24 @@ docs: 修正 README 拼写 [ADR-none]
 
 `[ADR-none]` 仅限不影响架构的改动。
 
+## 紧急绕过
+
+当 spec-vc binary 损坏、skill 路径变更或 venv 错乱导致 commit 被 token 门禁锁死时，可临时绕过：
+
+```bash
+SPEC_VC_BYPASS=<原因> git commit -m "fix: ... [ADR-001]"
+```
+
+绕过时 hook 会向 `.git/spec-vc-bypass.log` 写入一行审计记录（时间 | 原因 | commit subject）。建议原因字段填写 `hotfix` / `ci` / `bisect` / `migration` / `repair`，便于事后追溯。
+
+如果环境变量方式自身也失效，最终兜底方案：
+
+```bash
+chmod -x .git/hooks/commit-msg  # 让 git 跳过 hook（git 原生行为）
+```
+
+绕过是临时应急手段，不替代正常流程。修改完成后建议恢复 hook 并重新走 `spec-vc commit` 路径。
+
 ## 友情链接
 
 - [Linux.do](https://linux.do/)

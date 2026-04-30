@@ -164,6 +164,79 @@ def test_commit_msg_allows_adr_none_for_docs_change(tmp_path: Path):
     assert proc.returncode == 0
 
 
+def _run_with_env(repo: Path, *args: str, extra_env: dict | None = None):
+    """ADR-007 测试辅助：调用 hook 并附加自定义环境变量。"""
+    import sys as _sys
+    root = Path(__file__).resolve().parents[2]
+    env = {**os.environ, "PYTHONPATH": str(root / "src")}
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [_sys.executable, "-m", "spec_vc.cli", *args],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def test_commit_msg_bypass_env_skips_token_check(tmp_path: Path):
+    """ADR-007: SPEC_VC_BYPASS 非空时跳过 token 校验并写审计日志。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    # 不写 token，靠 bypass 通过
+    proc = _run_with_env(
+        repo, "hook", "commit-msg", str(msg),
+        extra_env={"SPEC_VC_BYPASS": "hotfix"},
+    )
+    assert proc.returncode == 0, f"bypass 应放行, stderr={proc.stderr}"
+    log_path = repo / ".git" / "spec-vc-bypass.log"
+    assert log_path.exists(), "bypass 日志应被创建"
+    log_content = log_path.read_text()
+    assert "hotfix" in log_content
+    assert "docs: update [ADR-none]" in log_content
+    # 验证格式：含管道分隔符
+    assert log_content.count(" | ") >= 2
+
+
+def test_commit_msg_bypass_empty_string_falls_back_to_token(tmp_path: Path):
+    """ADR-007: SPEC_VC_BYPASS 空字符串视为未触发，走原 token 校验。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = _run_with_env(
+        repo, "hook", "commit-msg", str(msg),
+        extra_env={"SPEC_VC_BYPASS": ""},
+    )
+    assert proc.returncode != 0, "空字符串不应触发 bypass"
+    assert "未找到提交 token" in proc.stderr
+    # 错误信息应显式列出 bypass 用法
+    assert "SPEC_VC_BYPASS" in proc.stderr
+
+
+def test_commit_msg_bypass_log_failure_is_fail_open(tmp_path: Path):
+    """ADR-007: 日志写入失败时 hook 仍放行（fail-open）。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    # 把日志路径预先做成目录——open("a") 会报 IsADirectoryError
+    log_path = repo / ".git" / "spec-vc-bypass.log"
+    log_path.mkdir()
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = _run_with_env(
+        repo, "hook", "commit-msg", str(msg),
+        extra_env={"SPEC_VC_BYPASS": "repair"},
+    )
+    assert proc.returncode == 0, f"日志写入失败时应仍放行, stderr={proc.stderr}"
+    assert "bypass 日志写入失败" in proc.stderr
+
+
 def test_status_fails_on_invalid_rev_range(tmp_path: Path):
     repo = init_repo(tmp_path)
     proc = run(repo, "adr", "status", "--rev-range", "missing..HEAD")
