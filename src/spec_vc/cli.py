@@ -4,6 +4,7 @@ import argparse
 from datetime import date
 from pathlib import Path
 import json
+import os
 import re
 import sys
 
@@ -32,13 +33,19 @@ from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
 from .commit import (
+    AUDIT_REPORT_FILENAME,
+    COMMIT_MSG_FILENAME,
+    MANIFEST_FILENAME,
+    TEST_REPORT_FILENAME,
     build_audit_manifest,
     cleanup_tests,
     gather_commit_context,
     manifest_to_json,
     prepare_audit_prompt,
     prepare_test_prompt,
+    write_commit_message,
     write_commit_token,
+    _sha256_hex,
 )
 from .spec import (
     check_spec_readiness,
@@ -359,6 +366,168 @@ def cmd_skill_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_spec_readiness_issues(issues):
+    print("## Spec 就绪检查 - 未通过", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("以下 Spec 未完成填写或形式化，请先补齐后再提交：", file=sys.stderr)
+    print("", file=sys.stderr)
+    for issue in issues:
+        print(f"  Spec-{issue.spec_id} / {issue.location}", file=sys.stderr)
+        print(f"    → {issue.problem}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("修复步骤：", file=sys.stderr)
+    print("  1. 填写 dev-doc.md 中各区块内容（概述/接口契约/数据形状/行为规则）", file=sys.stderr)
+    print("  2. 运行 spec-vc spec formalize 生成形式化文件", file=sys.stderr)
+    print("  3. 运行 spec-vc spec check 确认就绪", file=sys.stderr)
+
+
+def _print_staged_and_specs(ctx):
+    print(f"## Staged Files ({len(ctx.staged_files)})", file=sys.stderr)
+    for f in ctx.staged_files:
+        print(f"  {f}", file=sys.stderr)
+    print(f"\n## Specs ({len(ctx.spec_dirs)})", file=sys.stderr)
+    if not ctx.spec_dirs:
+        print("  (尚无 Spec 文件，跳过审计)", file=sys.stderr)
+    else:
+        for spec_id in ctx.spec_dirs:
+            formal = ctx.formal_files.get(spec_id, [])
+            doc_status = "✓" if spec_id in ctx.dev_docs else "✗"
+            print(f"  Spec-{spec_id}: dev-doc [{doc_status}], formal: {', '.join(formal) if formal else '无'}", file=sys.stderr)
+
+
+def cmd_commit_prepare(args: argparse.Namespace) -> int:
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    ctx = gather_commit_context(repo_root, config)
+
+    if not ctx.staged_files:
+        print("(无 staged changes，无需提交)")
+        return 0
+
+    if ctx.spec_readiness_issues:
+        _print_spec_readiness_issues(ctx.spec_readiness_issues)
+        return 1
+
+    manifest = build_audit_manifest(ctx)
+    manifest_json = manifest_to_json(manifest)
+    manifest_path = repo_root / ".git" / MANIFEST_FILENAME
+    manifest_path.write_text(manifest_json)
+
+    if getattr(args, 'message', None):
+        write_commit_message(repo_root, args.message)
+
+    use_text = getattr(args, 'format', 'json') == 'text'
+
+    _print_staged_and_specs(ctx)
+
+    if use_text:
+        print(f"\n## === AUDIT SUBAGENT PROMPT ===")
+        print(prepare_audit_prompt(ctx))
+        print(f"\n## === TEST SUBAGENT PROMPT ===")
+        print(prepare_test_prompt(ctx))
+    else:
+        print(manifest_json)
+
+    print("\n[spec-vc] manifest 已写入 .git/spec-vc-manifest.json", file=sys.stderr)
+    if getattr(args, 'message', None):
+        print("[spec-vc] commit message 已写入 .git/spec-vc-commit-msg", file=sys.stderr)
+    print("[spec-vc] 请完成审计后由用户在终端运行: spec-vc commit submit", file=sys.stderr)
+
+    return 0
+
+
+def cmd_commit_submit(args: argparse.Namespace) -> int:
+    if not os.isatty(sys.stdin.fileno()) and not os.environ.get("SPEC_VC_TEST_TTY_BYPASS"):
+        print("[spec-vc] 此命令仅在真实终端中运行。", file=sys.stderr)
+        print("[spec-vc] 请在终端中输入 spec-vc commit submit 手动提交。", file=sys.stderr)
+        return 1
+
+    repo_root = _repo_root()
+    config = load_config(repo_root)
+    git_dir = repo_root / ".git"
+
+    manifest_path = git_dir / MANIFEST_FILENAME
+    if not manifest_path.exists():
+        print("[spec-vc] 未找到 manifest 文件，请先运行 spec-vc commit prepare", file=sys.stderr)
+        return 1
+
+    saved_manifest = json.loads(manifest_path.read_text())
+
+    ctx = gather_commit_context(repo_root, config)
+
+    if not ctx.staged_files:
+        print("(无 staged changes，无需提交)")
+        return 0
+
+    current_manifest = build_audit_manifest(ctx)
+    current_manifest_dict = json.loads(manifest_to_json(current_manifest))
+
+    mismatch_fields = []
+    if sorted(saved_manifest.get("staged_files", [])) != sorted(current_manifest_dict.get("staged_files", [])):
+        mismatch_fields.append("staged_files")
+    if sorted(saved_manifest.get("spec_dirs", [])) != sorted(current_manifest_dict.get("spec_dirs", [])):
+        mismatch_fields.append("spec_dirs")
+
+    if mismatch_fields:
+        print(f"[spec-vc] manifest 不匹配（{', '.join(mismatch_fields)} 在 prepare 后已变更），请重新运行 spec-vc commit prepare", file=sys.stderr)
+        return 1
+
+    audit_path = git_dir / AUDIT_REPORT_FILENAME
+    test_path = git_dir / TEST_REPORT_FILENAME
+
+    if not audit_path.exists():
+        print("[spec-vc] 未找到审计报告 .git/spec-vc-audit-report.json", file=sys.stderr)
+        return 1
+    if not test_path.exists():
+        print("[spec-vc] 未找到测试报告 .git/spec-vc-test-report.json", file=sys.stderr)
+        return 1
+
+    from .verify import run_verify
+    verify_result = run_verify(
+        audit_report_path=audit_path,
+        test_report_path=test_path,
+        manifest_path=manifest_path,
+    )
+
+    from dataclasses import asdict as _asdict
+    vr = json.dumps(_asdict(verify_result), ensure_ascii=False, indent=2)
+    print(vr)
+
+    if not verify_result.all_pass:
+        print("[spec-vc] verify 未通过，无法继续提交。", file=sys.stderr)
+        return 1
+
+    if not os.environ.get("SPEC_VC_TEST_TTY_BYPASS"):
+        try:
+            input("[spec-vc] 按 Enter 确认提交，Ctrl-C 取消... ")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[spec-vc] 提交已取消。", file=sys.stderr)
+            return 1
+
+    manifest_hash = _sha256_hex(manifest_path)
+    audit_hash = _sha256_hex(audit_path)
+    test_hash = _sha256_hex(test_path)
+
+    write_commit_token(repo_root,
+                       manifest_hash=manifest_hash,
+                       audit_hash=audit_hash,
+                       test_hash=test_hash)
+
+    msg_path = git_dir / COMMIT_MSG_FILENAME
+    try:
+        if msg_path.exists():
+            run_git(repo_root, "commit", "-F", str(msg_path))
+            msg_path.unlink()
+        else:
+            run_git(repo_root, "commit", "-m", getattr(args, 'message', 'commit [ADR-008]'))
+    except SpecVCError as e:
+        print(f"[spec-vc] git commit 失败:\n{e}", file=sys.stderr)
+        return 1
+
+    print("[spec-vc] 提交完成。", file=sys.stderr)
+    return 0
+
+
 def cmd_commit(args: argparse.Namespace) -> int:
     if args.subcommand == "clean":
         repo_root = _repo_root()
@@ -373,56 +542,14 @@ def cmd_commit(args: argparse.Namespace) -> int:
             print("(无测试目录需要清理)")
         return 0
 
-    repo_root = _repo_root()
-    config = load_config(repo_root)
-    ctx = gather_commit_context(repo_root, config)
+    if args.subcommand == "prepare":
+        return cmd_commit_prepare(args)
 
-    if not ctx.staged_files:
-        print("(无 staged changes，无需提交)")
-        return 0
+    if args.subcommand == "submit":
+        return cmd_commit_submit(args)
 
-    if ctx.spec_readiness_issues:
-        print("## Spec 就绪检查 - 未通过", file=sys.stderr)
-        print("", file=sys.stderr)
-        print("以下 Spec 未完成填写或形式化，请先补齐后再提交：", file=sys.stderr)
-        print("", file=sys.stderr)
-        for issue in ctx.spec_readiness_issues:
-            print(f"  Spec-{issue.spec_id} / {issue.location}", file=sys.stderr)
-            print(f"    → {issue.problem}", file=sys.stderr)
-        print("", file=sys.stderr)
-        print("修复步骤：", file=sys.stderr)
-        print("  1. 填写 dev-doc.md 中各区块内容（概述/接口契约/数据形状/行为规则）", file=sys.stderr)
-        print("  2. 运行 spec-vc spec formalize 生成形式化文件", file=sys.stderr)
-        print("  3. 运行 spec-vc spec check 确认就绪", file=sys.stderr)
-        return 1
-
-    write_commit_token(repo_root)
-
-    use_text = getattr(args, 'format', 'json') == 'text'
-
-    print(f"## Staged Files ({len(ctx.staged_files)})", file=sys.stderr)
-    for f in ctx.staged_files:
-        print(f"  {f}", file=sys.stderr)
-
-    print(f"\n## Specs ({len(ctx.spec_dirs)})", file=sys.stderr)
-    if not ctx.spec_dirs:
-        print("  (尚无 Spec 文件，跳过审计)", file=sys.stderr)
-    else:
-        for spec_id in ctx.spec_dirs:
-            formal = ctx.formal_files.get(spec_id, [])
-            doc_status = "✓" if spec_id in ctx.dev_docs else "✗"
-            print(f"  Spec-{spec_id}: dev-doc [{doc_status}], formal: {', '.join(formal) if formal else '无'}", file=sys.stderr)
-
-    if use_text:
-        print(f"\n## === AUDIT SUBAGENT PROMPT ===")
-        print(prepare_audit_prompt(ctx))
-        print(f"\n## === TEST SUBAGENT PROMPT ===")
-        print(prepare_test_prompt(ctx))
-    else:
-        manifest = build_audit_manifest(ctx)
-        print(manifest_to_json(manifest))
-
-    return 0
+    print("[spec-vc] 请指定子命令: prepare, submit, clean, verify", file=sys.stderr)
+    return 1
 
 
 def cmd_commit_verify(args: argparse.Namespace) -> int:
@@ -775,6 +902,12 @@ def build_parser() -> argparse.ArgumentParser:
     commit = sub.add_parser("commit")
     commit.add_argument("--format", choices=["json", "text"], default="json")
     commit_sub = commit.add_subparsers(dest="subcommand")
+    commit_prepare = commit_sub.add_parser("prepare")
+    commit_prepare.add_argument("--message")
+    commit_prepare.add_argument("--format", choices=["json", "text"], default="json")
+    commit_prepare.set_defaults(func=cmd_commit)
+    commit_submit = commit_sub.add_parser("submit")
+    commit_submit.set_defaults(func=cmd_commit)
     commit_clean = commit_sub.add_parser("clean")
     commit_clean.set_defaults(func=cmd_commit)
     commit_verify = commit_sub.add_parser("verify")

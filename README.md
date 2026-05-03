@@ -63,7 +63,9 @@ pre-validation：修改前验证口径
     ↓
 post-validation：修改后验证
     ↓
-spec-vc commit：多 agent 验证 → 提交
+commit prepare：AI 生成 manifest + subagent 审计（不写 token）
+    ↓
+commit submit：用户在终端手动提交（TTY 检测 + 交叉比对 + 写 token）
     ↓
 close：回填 ADR 摘要，关闭变更
 ```
@@ -72,20 +74,13 @@ close：回填 ADR 摘要，关闭变更
 
 ## spec-vc commit 做了什么
 
-`spec-vc commit` 不只是 `git commit` 的包装。它在提交前会执行一个多 agent 验证协议：
+两阶段提交协议，AI 做验证，用户在终端手动提交：
 
-1. **收集上下文**：CLI 收集 staged diff、关联的 Spec、形式化文件，生成 manifest
-2. **动态分配 subagent**：根据复杂度报告，启动多个审计 subagent 和测试 subagent 并行工作
-   - 审计 subagent：检查代码是否符合 Spec（接口契约、数据形状、行为规则）
-   - 测试 subagent：验证形式化规格的可测试性
-3. **机械化 post-check**：覆盖率检查、格式合规检查、物证检查
-4. **语义审查**：主 agent 做矛盾检测和遗漏判断
-5. **判定**：
-   - 全部通过 → 自动提交
-   - 存在警告 → 展示给用户确认
-   - 存在问题 → BLOCKED，修复后重试
+**`commit prepare`（AI 执行）**：Spec 就绪检查 → 生成 manifest → 分配 subagent 审计和测试 → 机械化 verify → 语义审查 → 提示用户下一步
 
-这个机制的目的是：**让每次提交都有可追溯的验证证据**，而不只是"代码能跑就行"。
+**`commit submit`（用户终端执行）**：TTY 检测 → manifest 交叉比对 → verify → 交互确认 → 写 hash chain token → `git commit`
+
+commit-msg hook 在提交通路二次校验 token 内哈希链，确保报告未被篡改。
 
 ## 快速使用
 
@@ -107,13 +102,13 @@ uv sync
 
 ### 提交代码
 
-修改代码后，在 Claude Code 中运行：
+AI 完成代码修改和审计后，在终端运行：
 
-```
-/spec-vc commit
+```bash
+spec-vc commit submit
 ```
 
-AI 会引导你完成验证流程，通过后自动提交。
+AI 会先执行 `commit prepare` 完成 subagent 验证流程，然后提示你在终端手动提交。
 
 ### 其他命令
 

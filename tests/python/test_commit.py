@@ -41,7 +41,7 @@ def init_repo(tmp_path: Path) -> Path:
 
 def test_commit_no_staged_changes(tmp_path: Path):
     repo = init_repo(tmp_path)
-    proc = run(repo, "commit")
+    proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
     assert "无 staged changes" in proc.stdout
 
@@ -50,7 +50,7 @@ def test_commit_reports_staged_files(tmp_path: Path):
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("hello")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    proc = run(repo, "commit")
+    proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
     assert "Staged Files" in proc.stderr
     assert "README.md" in proc.stderr
@@ -65,7 +65,7 @@ def _stage_src_file(repo: Path) -> None:
 def test_commit_generates_audit_prompt(tmp_path: Path):
     repo = init_repo(tmp_path)
     _stage_src_file(repo)
-    proc = run(repo, "commit", "--format", "text")
+    proc = run(repo, "commit", "prepare", "--format", "text")
     assert proc.returncode == 0
     assert "AUDIT SUBAGENT PROMPT" in proc.stdout
     assert "审计规则" in proc.stdout
@@ -75,7 +75,7 @@ def test_commit_generates_audit_prompt(tmp_path: Path):
 def test_commit_generates_test_prompt(tmp_path: Path):
     repo = init_repo(tmp_path)
     _stage_src_file(repo)
-    proc = run(repo, "commit", "--format", "text")
+    proc = run(repo, "commit", "prepare", "--format", "text")
     assert proc.returncode == 0
     assert "TEST SUBAGENT PROMPT" in proc.stdout
     assert "测试生成" in proc.stdout
@@ -135,7 +135,7 @@ INFO 级别记录请求事件。
     (spec_dir / "schema.json").write_text('{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"test","type":"object","properties":{"status":{"type":"string"}}}')
     (spec_dir / "behavior.feature").write_text("Feature: test\n  Scenario: get status\n    When GET /test\n    Then status is 200\n")
 
-    proc = run(repo, "commit")
+    proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
     # human-readable info on stderr
     assert "Spec-001" in proc.stderr

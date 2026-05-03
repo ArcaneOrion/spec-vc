@@ -120,11 +120,26 @@ def test_commit_msg_rejects_multiple_tokens(tmp_path: Path):
 
 
 def _write_token(repo: Path):
-    """写入一个有效的提交通行 token。"""
+    """写入一个有效的 hash chain token 及配套 manifest/audit/test 文件。"""
+    import hashlib
     import time
     import uuid
-    token_path = repo / ".git" / "spec-vc-commit-token"
-    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}"
+
+    git_dir = repo / ".git"
+
+    manifest = git_dir / "spec-vc-manifest.json"
+    manifest.write_text('{"staged_files":["README.md"],"dummy":true}')
+    audit = git_dir / "spec-vc-audit-report.json"
+    audit.write_text('{"findings":[],"dummy":true}')
+    test = git_dir / "spec-vc-test-report.json"
+    test.write_text('{"unit_results":[],"dummy":true}')
+
+    manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    audit_hash = hashlib.sha256(audit.read_bytes()).hexdigest()
+    test_hash = hashlib.sha256(test.read_bytes()).hexdigest()
+
+    token_path = git_dir / "spec-vc-commit-token"
+    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}\n{manifest_hash}\n{audit_hash}\n{test_hash}"
     token_path.write_text(token_content)
 
 
@@ -235,6 +250,51 @@ def test_commit_msg_bypass_log_failure_is_fail_open(tmp_path: Path):
     )
     assert proc.returncode == 0, f"日志写入失败时应仍放行, stderr={proc.stderr}"
     assert "bypass 日志写入失败" in proc.stderr
+
+
+def test_hook_token_hash_chain_valid(tmp_path: Path):
+    """hash chain token 哈希匹配时 hook 放行并消费 token。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _write_token(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode == 0, f"hash chain 匹配应放行, stderr={proc.stderr}"
+    assert not (repo / ".git" / "spec-vc-commit-token").exists(), "token 应被消费"
+
+
+def test_hook_token_hash_chain_tampered_audit(tmp_path: Path):
+    """篡改 audit report 后 hash chain 校验阻塞。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _write_token(repo)
+    # 篡改 audit report
+    audit_path = repo / ".git" / "spec-vc-audit-report.json"
+    audit_path.write_text('{"tampered":true}')
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0, "篡改后应阻塞"
+    assert "不匹配" in proc.stderr
+
+
+def test_hook_bypass_skips_hash_chain_validation(tmp_path: Path):
+    """SPEC_VC_BYPASS 非空时完全跳过 token 和 hash chain 校验。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    # 不写 token，不写 manifest/report——bypass 应跳过一切 token 相关校验
+    msg = repo / "msg.txt"
+    msg.write_text("docs: hotfix [ADR-none]\n")
+    proc = _run_with_env(
+        repo, "hook", "commit-msg", str(msg),
+        extra_env={"SPEC_VC_BYPASS": "hotfix"},
+    )
+    assert proc.returncode == 0, f"bypass 应跳过 hash chain 校验, stderr={proc.stderr}"
+    assert (repo / ".git" / "spec-vc-bypass.log").exists()
 
 
 def test_status_fails_on_invalid_rev_range(tmp_path: Path):

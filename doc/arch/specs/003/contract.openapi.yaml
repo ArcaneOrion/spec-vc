@@ -1,0 +1,71 @@
+openapi: 3.0.3
+info:
+  title: spec-vc commit prepare/submit (TTY-bound two-phase commit)
+  version: "0.4.0"
+  description: |
+    spec-vc commit 的两阶段 CLI 命令契约。prepare 供 AI 调用生成 manifest，
+    submit 仅由用户在真实 TTY 终端运行以完成提交。OpenAPI 在此用作 CLI 行为契约的形式化载体。
+paths:
+  /commit/prepare:
+    post:
+      summary: 生成提交 manifest 与 commit message 草稿
+      description: |
+        Spec 就绪检查通过后，收集 staged files 与 spec 信息，生成 manifest 写入
+        .git/spec-vc-manifest.json，生成 commit message 写入 .git/spec-vc-commit-msg。
+        不写入 token——本命令不产生提交权限。
+      parameters:
+        - in: query
+          name: message
+          description: commit message 完整内容（含 subject + body），可选
+          required: false
+          schema:
+            type: string
+      responses:
+        "0":
+          description: manifest 已生成，stdout 输出 manifest JSON
+        "1":
+          description: Spec 未就绪或无 staged changes，原因经 stderr 输出
+
+  /commit/submit:
+    post:
+      summary: TTY-bound 终审提交
+      description: |
+        仅在真实 TTY 终端可执行（os.isatty 检测）。流程：
+        1) 重新生成 manifest 与 .git/spec-vc-manifest.json 交叉比对
+        2) 读 audit-report.json + test-report.json 跑机械化 verify
+        3) 交互确认（stdin 读 Enter）
+        4) 写含 hash chain 的 token 到 .git/spec-vc-commit-token
+        5) 执行 git commit -F .git/spec-vc-commit-msg
+        6) 删除 .git/spec-vc-commit-msg
+      responses:
+        "0":
+          description: 提交成功，commit 已创建
+        "1":
+          description: 阻塞原因经 stderr 输出（非 TTY / manifest 不匹配 / verify 失败 / 无 staged changes）
+
+  /commit-msg-hook:
+    post:
+      summary: commit-msg hook（hash chain 升级）
+      description: |
+        git commit-msg hook 的升级版校验逻辑：
+        1) 检查 SPEC_VC_BYPASS 环境变量——非空时跳过 token 校验直接放行
+        2) 校验 token 存在且未过期
+        3) 从 token 读出 manifest_hash, audit_hash, test_hash
+        4) 重新计算 .git/spec-vc-manifest.json, .git/spec-vc-audit-report.json, .git/spec-vc-test-report.json 的哈希并比对
+        5) ADR 引用校验（不变）
+        6) 全部通过后消费 token（删除）并放行
+      parameters:
+        - in: query
+          name: SPEC_VC_BYPASS
+          description: 非空字符串触发 emergency bypass，完全跳过 token 校验（hash chain 也不比对）
+          required: false
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "0":
+          description: 放行 commit
+        "1":
+          description: 阻塞 commit，原因经 stderr 输出
+
+---

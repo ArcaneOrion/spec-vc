@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hashlib
 import json
 import math
 import shutil
@@ -22,25 +23,44 @@ from .spec import specs_root as get_specs_root
 
 TOKEN_TTL_SECONDS = 300
 TOKEN_FILENAME = "spec-vc-commit-token"
+MANIFEST_FILENAME = "spec-vc-manifest.json"
+AUDIT_REPORT_FILENAME = "spec-vc-audit-report.json"
+TEST_REPORT_FILENAME = "spec-vc-test-report.json"
+COMMIT_MSG_FILENAME = "spec-vc-commit-msg"
 
 
-def write_commit_token(repo_root: Path) -> Path:
-    """在 .git 目录写入一次性提交 token，返回 token 文件路径。"""
+def _sha256_hex(file_path: Path) -> str:
+    return hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+
+def write_commit_message(repo_root: Path, message: str) -> Path:
+    msg_path = repo_root / ".git" / COMMIT_MSG_FILENAME
+    msg_path.write_text(message)
+    return msg_path
+
+
+def write_commit_token(repo_root: Path,
+                       manifest_hash: str = "",
+                       audit_hash: str = "",
+                       test_hash: str = "") -> Path:
+    """写入 hash chain token 到 .git/spec-vc-commit-token。"""
     git_dir = repo_root / ".git"
     token_path = git_dir / TOKEN_FILENAME
-    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}"
-    token_path.write_text(token_content)
+    parts = [uuid.uuid4().hex, str(int(time.time()))]
+    if manifest_hash or audit_hash or test_hash:
+        parts.extend([manifest_hash, audit_hash, test_hash])
+    token_path.write_text("\n".join(parts))
     return token_path
 
 
 def validate_and_consume_token(repo_root: Path) -> None:
-    """校验 token 存在且未过期，校验通过后消费（删除）token。"""
+    """校验 token（含 hash chain），通过后消费（删除）token。"""
     git_dir = repo_root / ".git"
     token_path = git_dir / TOKEN_FILENAME
 
     if not token_path.exists():
         raise FileNotFoundError(
-            "未找到提交 token。请通过 spec-vc commit 流程提交代码，"
+            "未找到提交 token。请通过 spec-vc commit prepare + submit 流程提交代码，"
             "不要直接使用 git commit。\n"
             "紧急情况下可临时绕过（会写审计日志至 .git/spec-vc-bypass.log）：\n"
             "  SPEC_VC_BYPASS=<原因> git commit ..."
@@ -50,20 +70,53 @@ def validate_and_consume_token(repo_root: Path) -> None:
     lines = content.split("\n")
     if len(lines) < 2:
         token_path.unlink()
-        raise ValueError("token 格式无效，请重新执行 spec-vc commit")
+        raise ValueError("token 格式无效，请重新执行 spec-vc commit prepare + submit")
 
     try:
         token_ts = int(lines[1])
     except ValueError:
         token_path.unlink()
-        raise ValueError("token 格式无效，请重新执行 spec-vc commit")
+        raise ValueError("token 格式无效，请重新执行 spec-vc commit prepare + submit")
 
     if time.time() - token_ts > TOKEN_TTL_SECONDS:
         token_path.unlink()
         raise TimeoutError(
             f"提交 token 已过期（有效期 {TOKEN_TTL_SECONDS // 60} 分钟），"
-            "请重新执行 spec-vc commit"
+            "请重新执行 spec-vc commit prepare + submit"
         )
+
+    if len(lines) == 2:
+        token_path.unlink()
+        raise ValueError(
+            "token 格式已升级，旧格式不再支持。"
+            "请使用 spec-vc commit prepare + submit 流程重新提交"
+        )
+
+    if len(lines) != 5:
+        token_path.unlink()
+        raise ValueError("token 格式无效，请重新执行 spec-vc commit prepare + submit")
+
+    manifest_hash, audit_hash, test_hash = lines[2], lines[3], lines[4]
+
+    manifest_path = git_dir / MANIFEST_FILENAME
+    audit_path = git_dir / AUDIT_REPORT_FILENAME
+    test_path = git_dir / TEST_REPORT_FILENAME
+
+    for fpath, fname, expected in [
+        (manifest_path, "manifest", manifest_hash),
+        (audit_path, "审计报告", audit_hash),
+        (test_path, "测试报告", test_hash),
+    ]:
+        if not fpath.exists():
+            token_path.unlink()
+            raise FileNotFoundError(f"{fname} 文件不存在，请重新执行 spec-vc commit prepare")
+        actual = _sha256_hex(fpath)
+        if actual != expected:
+            token_path.unlink()
+            raise ValueError(
+                f"{fname} 与 token 内哈希不匹配，可能已被篡改。"
+                "请重新执行 spec-vc commit prepare + submit"
+            )
 
     token_path.unlink()
 

@@ -30,7 +30,8 @@
 | ADR-004 | init命令增加uv环境安装步骤 | Accepted | 2026-04-26 |
 | ADR-005 | 引入 Spec 结构化规格层与 subagent 审计协议 | Accepted | 2026-04-26 |
 | ADR-006 | 引入 commit token 门禁机制，强制通过 spec-vc commit 提交 | Accepted | 2026-04-27 |
-| ADR-007 | 为 commit token 门禁引入 emergency bypass 机制 | Proposed | 2026-04-30 |
+| ADR-007 | 为 commit token 门禁引入 emergency bypass 机制 | Accepted | 2026-04-30 |
+| ADR-008 | 引入 TTY-bound commit 机制，将 spec-vc commit 拆分为 prepare/submit 两阶段 | Proposed | 2026-05-03 |
 
 ## 状态图例
 

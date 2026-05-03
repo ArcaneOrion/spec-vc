@@ -251,7 +251,7 @@ def test_commit_blocks_on_incomplete_specs(tmp_path: Path):
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
     # dev-doc still "待补充", formal files still skeleton
 
-    proc = run(repo, "commit")
+    proc = run(repo, "commit", "prepare")
     assert proc.returncode == 1
     assert "Spec 就绪检查" in proc.stderr
     assert "未通过" in proc.stderr
@@ -270,7 +270,7 @@ def test_commit_passes_with_ready_specs(tmp_path: Path):
     (base / "dev-doc.md").write_text(doc)
     run(repo, "spec", "formalize", "001", "--type", "all")
 
-    proc = run(repo, "commit")
+    proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
     import json
     manifest = json.loads(proc.stdout)

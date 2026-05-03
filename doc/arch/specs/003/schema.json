@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ADR-008 commit prepare/submit data shapes",
+  "type": "object",
+  "properties": {
+    "CommitToken": {
+      "type": "object",
+      "description": ".git/spec-vc-commit-token 格式——由 submit 写入，hook 消费",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "format": "uuid",
+          "description": "一次性 token 唯一标识"
+        },
+        "timestamp": {
+          "type": "integer",
+          "description": "Unix 时间戳，用于 300 秒过期校验"
+        },
+        "manifest_hash": {
+          "type": "string",
+          "description": ".git/spec-vc-manifest.json 内容的 SHA-256 哈希（hex）"
+        },
+        "audit_hash": {
+          "type": "string",
+          "description": ".git/spec-vc-audit-report.json 内容的 SHA-256 哈希（hex）"
+        },
+        "test_hash": {
+          "type": "string",
+          "description": ".git/spec-vc-test-report.json 内容的 SHA-256 哈希（hex）"
+        }
+      },
+      "required": ["uuid", "timestamp", "manifest_hash", "audit_hash", "test_hash"]
+    },
+    "Manifest": {
+      "type": "object",
+      "description": ".git/spec-vc-manifest.json 格式——由 prepare 写入，submit 交叉比对",
+      "properties": {
+        "staged_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "git staged 文件路径列表（仓库根相对路径）"
+        },
+        "spec_dirs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "相关 Spec ID 列表"
+        },
+        "audit_units": {
+          "type": "array",
+          "description": "审计单元列表，每个含 spec_id, formal_files, dev_doc_summary"
+        },
+        "test_units": {
+          "type": "array",
+          "description": "测试单元列表，每个含 formal_type, formal_content"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "prepare 时间戳"
+        }
+      },
+      "required": ["staged_files", "spec_dirs", "audit_units", "test_units", "timestamp"]
+    },
+    "SubmitVerification": {
+      "type": "object",
+      "description": "submit 命令的输出——机械化验证结果",
+      "properties": {
+        "tty_check": {
+          "type": "boolean",
+          "description": "TTY 检测是否通过"
+        },
+        "manifest_match": {
+          "type": "boolean",
+          "description": "当前仓库状态与 prepare 时的 manifest 是否一致"
+        },
+        "verify_result": {
+          "type": "object",
+          "description": "commit verify 的 VerificationResult（覆盖/格式/物证）"
+        },
+        "token_written": {
+          "type": "boolean",
+          "description": "hash chain token 是否成功写入"
+        }
+      },
+      "required": ["tty_check", "manifest_match", "verify_result", "token_written"]
+    }
+  }
+}
+
+---
