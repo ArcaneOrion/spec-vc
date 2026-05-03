@@ -272,12 +272,8 @@ def test_commit_passes_with_ready_specs(tmp_path: Path):
 
     proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
-    import json
-    manifest = json.loads(proc.stdout)
-    assert "audit_units" in manifest
-    assert len(manifest["audit_units"]) == 1
-    assert manifest["audit_units"][0]["spec_id"] == "001"
     assert "Spec-001" in proc.stderr
+    # ADR-010: stdout no longer contains manifest JSON
 
 
 def test_adr_show_displays_content(tmp_path: Path):

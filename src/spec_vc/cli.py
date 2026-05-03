@@ -33,18 +33,9 @@ from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
 from .commit import (
-    AUDIT_REPORT_FILENAME,
     COMMIT_MSG_FILENAME,
-    MANIFEST_FILENAME,
     PREPARE_TS_FILENAME,
-    SUBAGENT_SESSIONS_FILENAME,
-    TEST_REPORT_FILENAME,
-    build_audit_manifest,
-    cleanup_tests,
     gather_commit_context,
-    manifest_to_json,
-    prepare_audit_prompt,
-    prepare_test_prompt,
     write_commit_message,
     write_commit_token,
 )
@@ -409,11 +400,6 @@ def cmd_commit_prepare(args: argparse.Namespace) -> int:
         _print_spec_readiness_issues(ctx.spec_readiness_issues)
         return 1
 
-    manifest = build_audit_manifest(ctx)
-    manifest_json = manifest_to_json(manifest)
-    manifest_path = repo_root / ".git" / MANIFEST_FILENAME
-    manifest_path.write_text(manifest_json)
-
     from datetime import datetime, timezone
     ts_path = repo_root / ".git" / PREPARE_TS_FILENAME
     ts_path.write_text(datetime.now(timezone.utc).isoformat())
@@ -421,19 +407,8 @@ def cmd_commit_prepare(args: argparse.Namespace) -> int:
     if getattr(args, 'message', None):
         write_commit_message(repo_root, args.message)
 
-    use_text = getattr(args, 'format', 'json') == 'text'
-
     _print_staged_and_specs(ctx)
 
-    if use_text:
-        print(f"\n## === AUDIT SUBAGENT PROMPT ===")
-        print(prepare_audit_prompt(ctx))
-        print(f"\n## === TEST SUBAGENT PROMPT ===")
-        print(prepare_test_prompt(ctx))
-    else:
-        print(manifest_json)
-
-    print("\n[spec-vc] manifest 已写入 .git/spec-vc-manifest.json", file=sys.stderr)
     if getattr(args, 'message', None):
         print("[spec-vc] commit message 已写入 .git/spec-vc-commit-msg", file=sys.stderr)
     print("[spec-vc] 请完成审计后由用户在终端运行: spec-vc commit submit", file=sys.stderr)
@@ -451,56 +426,11 @@ def cmd_commit_submit(args: argparse.Namespace) -> int:
     config = load_config(repo_root)
     git_dir = repo_root / ".git"
 
-    manifest_path = git_dir / MANIFEST_FILENAME
-    if not manifest_path.exists():
-        print("[spec-vc] 未找到 manifest 文件，请先运行 spec-vc commit prepare", file=sys.stderr)
-        return 1
-
-    saved_manifest = json.loads(manifest_path.read_text())
-
     ctx = gather_commit_context(repo_root, config)
 
     if not ctx.staged_files:
         print("(无 staged changes，无需提交)")
         return 0
-
-    current_manifest = build_audit_manifest(ctx)
-    current_manifest_dict = json.loads(manifest_to_json(current_manifest))
-
-    mismatch_fields = []
-    if sorted(saved_manifest.get("staged_files", [])) != sorted(current_manifest_dict.get("staged_files", [])):
-        mismatch_fields.append("staged_files")
-    if sorted(saved_manifest.get("spec_dirs", [])) != sorted(current_manifest_dict.get("spec_dirs", [])):
-        mismatch_fields.append("spec_dirs")
-
-    if mismatch_fields:
-        print(f"[spec-vc] manifest 不匹配（{', '.join(mismatch_fields)} 在 prepare 后已变更），请重新运行 spec-vc commit prepare", file=sys.stderr)
-        return 1
-
-    audit_path = git_dir / AUDIT_REPORT_FILENAME
-    test_path = git_dir / TEST_REPORT_FILENAME
-
-    if not audit_path.exists():
-        print("[spec-vc] 未找到审计报告 .git/spec-vc-audit-report.json", file=sys.stderr)
-        return 1
-    if not test_path.exists():
-        print("[spec-vc] 未找到测试报告 .git/spec-vc-test-report.json", file=sys.stderr)
-        return 1
-
-    from .verify import run_verify
-    verify_result = run_verify(
-        audit_report_path=audit_path,
-        test_report_path=test_path,
-        manifest_path=manifest_path,
-    )
-
-    from dataclasses import asdict as _asdict
-    vr = json.dumps(_asdict(verify_result), ensure_ascii=False, indent=2)
-    print(vr)
-
-    if not verify_result.all_pass:
-        print("[spec-vc] verify 未通过，无法继续提交。", file=sys.stderr)
-        return 1
 
     if not os.environ.get("SPEC_VC_TEST_TTY_BYPASS"):
         try:
@@ -517,7 +447,7 @@ def cmd_commit_submit(args: argparse.Namespace) -> int:
             run_git(repo_root, "commit", "-F", str(msg_path))
             msg_path.unlink()
         else:
-            run_git(repo_root, "commit", "-m", getattr(args, 'message', 'commit [ADR-008]'))
+            run_git(repo_root, "commit", "-m", getattr(args, 'message', 'commit [ADR-009]'))
     except SpecVCError as e:
         print(f"[spec-vc] git commit 失败:\n{e}", file=sys.stderr)
         return 1
@@ -527,43 +457,14 @@ def cmd_commit_submit(args: argparse.Namespace) -> int:
 
 
 def cmd_commit(args: argparse.Namespace) -> int:
-    if args.subcommand == "clean":
-        repo_root = _repo_root()
-        config = load_config(repo_root)
-        specs_root = get_specs_root(repo_root, config.spec.dir)
-        removed = cleanup_tests(specs_root)
-        if removed:
-            print("已清理测试目录:")
-            for d in removed:
-                print(f"  {d}")
-        else:
-            print("(无测试目录需要清理)")
-        return 0
-
     if args.subcommand == "prepare":
         return cmd_commit_prepare(args)
 
     if args.subcommand == "submit":
         return cmd_commit_submit(args)
 
-    print("[spec-vc] 请指定子命令: prepare, submit, clean, verify", file=sys.stderr)
+    print("[spec-vc] 请指定子命令: prepare, submit", file=sys.stderr)
     return 1
-
-
-def cmd_commit_verify(args: argparse.Namespace) -> int:
-    from .verify import run_verify
-
-    result = run_verify(
-        audit_report_path=Path(args.audit_report),
-        test_report_path=Path(args.test_report),
-        manifest_path=Path(args.manifest),
-    )
-
-    import json
-    from dataclasses import asdict
-
-    print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
-    return 0 if result.all_pass else 1
 
 
 def cmd_spec_new(args: argparse.Namespace) -> int:
@@ -915,13 +816,6 @@ def build_parser() -> argparse.ArgumentParser:
     commit_prepare.set_defaults(func=cmd_commit)
     commit_submit = commit_sub.add_parser("submit")
     commit_submit.set_defaults(func=cmd_commit)
-    commit_clean = commit_sub.add_parser("clean")
-    commit_clean.set_defaults(func=cmd_commit)
-    commit_verify = commit_sub.add_parser("verify")
-    commit_verify.add_argument("--audit-report", required=True)
-    commit_verify.add_argument("--test-report", required=True)
-    commit_verify.add_argument("--manifest", required=True)
-    commit_verify.set_defaults(func=cmd_commit_verify)
     commit.set_defaults(func=cmd_commit)
 
     skill = sub.add_parser("skill")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 import sys
@@ -62,23 +61,33 @@ def _stage_src_file(repo: Path) -> None:
     subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
 
 
-def test_commit_generates_audit_prompt(tmp_path: Path):
+def test_commit_prepare_writes_commit_msg(tmp_path: Path):
     repo = init_repo(tmp_path)
     _stage_src_file(repo)
-    proc = run(repo, "commit", "prepare", "--format", "text")
+    proc = run(repo, "commit", "prepare", "--message", "feat(core): test [ADR-000]")
     assert proc.returncode == 0
-    assert "AUDIT SUBAGENT PROMPT" in proc.stdout
-    assert "审计规则" in proc.stdout
-    assert "Git Diff" in proc.stdout
+    msg_path = repo / ".git" / "spec-vc-commit-msg"
+    assert msg_path.exists()
+    assert "feat(core): test [ADR-000]" in msg_path.read_text()
 
 
-def test_commit_generates_test_prompt(tmp_path: Path):
+def test_commit_prepare_writes_prepare_ts(tmp_path: Path):
     repo = init_repo(tmp_path)
     _stage_src_file(repo)
-    proc = run(repo, "commit", "prepare", "--format", "text")
+    proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
-    assert "TEST SUBAGENT PROMPT" in proc.stdout
-    assert "测试生成" in proc.stdout
+    ts_path = repo / ".git" / "spec-vc-prepare-ts"
+    assert ts_path.exists()
+    assert ts_path.read_text().strip() != ""
+
+
+def test_commit_prepare_no_manifest_generated(tmp_path: Path):
+    """ADR-010: prepare no longer generates manifest/audit-report/test-report."""
+    repo = init_repo(tmp_path)
+    _stage_src_file(repo)
+    proc = run(repo, "commit", "prepare")
+    assert proc.returncode == 0
+    assert not (repo / ".git" / "spec-vc-manifest.json").exists()
 
 
 def test_commit_with_spec_files(tmp_path: Path):
@@ -87,16 +96,21 @@ def test_commit_with_spec_files(tmp_path: Path):
 
     spec_dir = repo / "doc" / "arch" / "specs" / "001"
     spec_dir.mkdir(parents=True)
-    (spec_dir / "dev-doc.md").write_text("""# Spec-001: 测试规格
+    (spec_dir / "dev-doc.md").write_text("""# Spec-001: test spec
 
 - **ADR**: ADR-000
 - **Status**: Draft
 - **Author**: test
 - **Date**: 2026-04-26
+- **Version**: 0.1.0
+
+---
 
 ## 概述
 
-测试概述
+test overview
+
+---
 
 ## 接口契约
 
@@ -109,27 +123,28 @@ GET /test:
 
 ## 数据形状
 
-测试数据
+test data
 
 ## 行为规则
 
-测试行为
+test behavior
 
 ## 非目标
 
-无
+none
+
+---
 
 ## 测试策略
 
-验收标准: GET /test 返回 200。
+验收标准: GET /test returns 200.
 
 ## 日志实现
 
-INFO 级别记录请求事件。
+INFO level logs request events.
 
-## References
+---
 
-- **ADR**: ADR-000
 """)
     (spec_dir / "contract.openapi.yaml").write_text("openapi: \"3.0.3\"\ninfo:\n  title: test\npaths:\n  /test:\n    get:\n      responses:\n        200:\n          description: ok\n")
     (spec_dir / "schema.json").write_text('{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"test","type":"object","properties":{"status":{"type":"string"}}}')
@@ -137,33 +152,5 @@ INFO 级别记录请求事件。
 
     proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
-    # human-readable info on stderr
     assert "Spec-001" in proc.stderr
-    assert "formal: contract.openapi.yaml" in proc.stderr
-    # JSON manifest on stdout
-    manifest = json.loads(proc.stdout)
-    assert "audit_units" in manifest
-    assert "test_units" in manifest
-    assert "complexity_report" in manifest
-    assert len(manifest["audit_units"]) == 1
-    assert manifest["audit_units"][0]["spec_id"] == "001"
-
-
-def test_commit_clean_removes_tests(tmp_path: Path):
-    repo = init_repo(tmp_path)
-    test_dir = repo / "doc" / "arch" / "specs" / "001" / "tests"
-    test_dir.mkdir(parents=True)
-    (test_dir / "test_example.py").write_text("def test(): pass\n")
-    assert test_dir.exists()
-
-    proc = run(repo, "commit", "clean")
-    assert proc.returncode == 0
-    assert "已清理" in proc.stdout
-    assert not test_dir.exists()
-
-
-def test_commit_clean_no_tests(tmp_path: Path):
-    repo = init_repo(tmp_path)
-    proc = run(repo, "commit", "clean")
-    assert proc.returncode == 0
-    assert "无测试目录" in proc.stdout
+    assert "manifest" not in proc.stdout.lower()

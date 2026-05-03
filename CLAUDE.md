@@ -7,9 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 uv sync                                        # 准备虚拟环境（首次或 pyproject.toml 变更后）
 uv run spec-vc --help                          # 运行 CLI
-uv run spec-vc commit prepare --message "..."  # AI 域：生成 manifest（不写 token）
+uv run spec-vc commit prepare --message "..."  # AI 域：Spec 检查 + 写入 commit-msg（不写 token）
 uv run spec-vc commit submit                   # 用户域：TTY 终审提交
-uv run spec-vc commit clean                    # 清理测试文件
 uv run pytest tests/python/ -v                 # 运行全部测试
 uv run pytest tests/python/test_spec.py -v     # 运行单个测试文件
 uv run pytest tests/python/ -k "formalize"     # 按关键词筛选运行
@@ -25,7 +24,7 @@ uv run pytest tests/python/ -k "formalize"     # 按关键词筛选运行
 | `adr.py` | ADR 数据模型(dataclass)、解析、渲染、编号、豁免判定 |
 | `spec.py` | Spec 数据模型(dataclass)、子目录管理、形式化文件生成 |
 | `change.py` | 变更状态机(discover→clarify→plan→implement-ready→validate→close)、plan 文件 CRUD |
-| `commit.py` | 提交上下文收集、审计/测试 subagent 提示词生成、test 清理 |
+| `commit.py` | token 门禁（写入/校验/消费）、提交上下文收集 |
 | `hooks.py` | commit-msg / prepare-commit-msg hook 校验逻辑 |
 | `config.py` | `.spec-vc.toml` 配置模型(ExemptionConfig/AdrRequiredConfig/SpecConfig) |
 | `status.py` | ADR↔commit 漂移检测 |
@@ -43,7 +42,7 @@ uv run pytest tests/python/ -k "formalize"     # 按关键词筛选运行
 
 **命令命名**: `spec-vc <domain> <action>`，如 `spec-vc spec new`、`spec-vc adr list`。`spec-vc commit` 和 `spec-vc adr init` 是顶层特殊命令。
 
-**commit message**: `<type>(<scope>): <subject> [ADR-NNN]`，subject 用中文简述。严格模式(hook)阻塞无 `[ADR-NNN]` 或 `[ADR-none]` 的 commit。提交采用 prepare/submit 两阶段协议：AI 运行 `commit prepare` 生成 manifest 并完成 subagent 审计，用户在终端运行 `commit submit` 完成 TTY 终审提交。
+**commit message**: `<type>(<scope>): <subject> [ADR-NNN]`，subject 用中文简述。严格模式(hook)阻塞无 `[ADR-NNN]` 或 `[ADR-none]` 的 commit。提交采用 prepare/submit 两阶段协议：AI 运行 `commit prepare` 完成 Spec 检查 + 写入 commit-msg，用户在终端运行 `commit submit` 完成 TTY 终审提交（PostToolUse hook + token + subagent session 三层防线）。
 
 **模板系统**: `templates/` 下存放 ADR/Spec/commit 模板文件,通过 `template_path()` 访问。
 
