@@ -36,6 +36,8 @@ from .commit import (
     AUDIT_REPORT_FILENAME,
     COMMIT_MSG_FILENAME,
     MANIFEST_FILENAME,
+    PREPARE_TS_FILENAME,
+    SUBAGENT_SESSIONS_FILENAME,
     TEST_REPORT_FILENAME,
     build_audit_manifest,
     cleanup_tests,
@@ -45,7 +47,6 @@ from .commit import (
     prepare_test_prompt,
     write_commit_message,
     write_commit_token,
-    _sha256_hex,
 )
 from .spec import (
     check_spec_readiness,
@@ -97,10 +98,10 @@ def _init_claude_hook(repo_root: Path) -> Path | None:
     settings_path = claude_dir / "settings.json"
 
     hook_entry = {
-        "matcher": "Bash",
+        "matcher": "Agent",
         "hooks": [{
             "type": "command",
-            "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use"
+            "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use --tool-name Agent --description \"${CLAUDE_TOOL_DESCRIPTION}\""
         }]
     }
 
@@ -114,7 +115,7 @@ def _init_claude_hook(repo_root: Path) -> Path | None:
         existing_hooks = existing.get("hooks", {})
         existing_post = existing_hooks.get("PostToolUse", [])
         for entry in existing_post:
-            if entry.get("matcher") == "Bash":
+            if entry.get("matcher") == "Agent":
                 for h in entry.get("hooks", []):
                     if "spec-vc hook post-tool-use" in h.get("command", ""):
                         return None
@@ -413,6 +414,10 @@ def cmd_commit_prepare(args: argparse.Namespace) -> int:
     manifest_path = repo_root / ".git" / MANIFEST_FILENAME
     manifest_path.write_text(manifest_json)
 
+    from datetime import datetime, timezone
+    ts_path = repo_root / ".git" / PREPARE_TS_FILENAME
+    ts_path.write_text(datetime.now(timezone.utc).isoformat())
+
     if getattr(args, 'message', None):
         write_commit_message(repo_root, args.message)
 
@@ -504,14 +509,7 @@ def cmd_commit_submit(args: argparse.Namespace) -> int:
             print("\n[spec-vc] 提交已取消。", file=sys.stderr)
             return 1
 
-    manifest_hash = _sha256_hex(manifest_path)
-    audit_hash = _sha256_hex(audit_path)
-    test_hash = _sha256_hex(test_path)
-
-    write_commit_token(repo_root,
-                       manifest_hash=manifest_hash,
-                       audit_hash=audit_hash,
-                       test_hash=test_hash)
+    write_commit_token(repo_root)
 
     msg_path = git_dir / COMMIT_MSG_FILENAME
     try:
@@ -682,6 +680,15 @@ def cmd_hook_prepare_commit_msg(args: argparse.Namespace) -> int:
     return run_prepare_commit_msg(Path(args.message_file), args.source or "", args.sha or "")
 
 
+def cmd_hook_post_tool_use(args: argparse.Namespace) -> int:
+    from .hooks import run_post_tool_use
+    return run_post_tool_use(
+        repo_root=_repo_root(),
+        tool_name=getattr(args, 'tool_name', ''),
+        description=getattr(args, 'description', ''),
+    )
+
+
 def cmd_show_adr(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
@@ -721,8 +728,10 @@ def cmd_show_change(_args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_hook_post_tool_use(_args: argparse.Namespace) -> int:
-    """Claude Code PostToolUse hook: 检测 spec-vc 关键命令，注入 plan/spec 内容到 AI 上下文。"""
+def _cmd_hook_post_tool_use_legacy(_args: argparse.Namespace) -> int:
+    """已废弃：旧的 stdin-JSON 上下文注入 hook。
+    被 ADR-009 PostToolUse session logging 机制取代。
+    保留此函数仅用于向后兼容——spec-vc init --seed 不再注册此路径。"""
 
     try:
         data = json.load(sys.stdin)
@@ -776,8 +785,6 @@ def cmd_hook_post_tool_use(_args: argparse.Namespace) -> int:
     # show 命令：直接使用 stdout 中的内容（CLI 已经输出了）
     elif " show " in command:
         if stdout.strip():
-            # show 命令的输出已经在 stdout 中，AI 可以直接看到
-            # 这里不需要重复注入
             pass
 
     if not output:
@@ -937,6 +944,8 @@ def build_parser() -> argparse.ArgumentParser:
     hook_prepare.set_defaults(func=cmd_hook_prepare_commit_msg)
 
     hook_post_tool = hook_sub.add_parser("post-tool-use")
+    hook_post_tool.add_argument("--tool-name", default="")
+    hook_post_tool.add_argument("--description", default="")
     hook_post_tool.set_defaults(func=cmd_hook_post_tool_use)
 
     return parser

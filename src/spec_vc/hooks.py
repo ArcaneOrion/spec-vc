@@ -18,6 +18,22 @@ EXACT_NONE_RE = re.compile(r"\[ADR-none\]")
 EXACT_NUM_RE = re.compile(r"\[ADR-(\d{3,})\]")
 
 BYPASS_LOG_FILENAME = "spec-vc-bypass.log"
+SUBAGENT_SESSIONS_FILENAME = "spec-vc-subagent-sessions.log"
+
+
+def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "") -> int:
+    """全量记录 Agent 工具调用到 subagent session log。"""
+    if not tool_name:
+        return 0
+    log_path = repo_root / ".git" / SUBAGENT_SESSIONS_FILENAME
+    timestamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    line = f"{timestamp} | {tool_name} | {description}\n"
+    try:
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError:
+        pass
+    return 0
 
 
 HELP_MISSING = """[spec-vc] Commit 被阻塞:subject 必须包含且只能包含一个 [ADR-NNN] 或 [ADR-none]"""

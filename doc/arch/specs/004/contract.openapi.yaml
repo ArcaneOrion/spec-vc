@@ -1,0 +1,66 @@
+openapi: 3.0.3
+info:
+  title: spec-vc commit hooks (PostToolUse + commit-msg)
+  version: "0.5.0"
+  description: |
+    spec-vc 的 hook 层契约。prepare/submit 拆分保留自 ADR-008，
+    新增 post-tool-use hook 记录 subagent 调用。
+paths:
+  /hook/post-tool-use:
+    post:
+      summary: 记录 Agent 工具调用到 subagent sessions log
+      description: |
+        由 Claude Code PostToolUse hook 触发，全量记录 Agent 工具调用。
+        AI agent 的 Bash 工具无法调用此端点——它只在 Claude Code harness 层执行。
+      parameters:
+        - in: query
+          name: tool_name
+          description: 被调用的工具名称
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: description
+          description: agent description 字段
+          required: false
+          schema:
+            type: string
+      responses:
+        "0":
+          description: 日志行已追加到 .git/spec-vc-subagent-sessions.log
+
+  /commit/prepare:
+    post:
+      summary: 生成 manifest + 写入 prepare 时间戳
+      description: |
+        Spec 检查 → manifest → .git/spec-vc-manifest.json + .git/spec-vc-prepare-ts
+        不写 token。
+      responses:
+        "0":
+          description: manifest 和 prepare-ts 已写入
+        "1":
+          description: Spec 未就绪或无 staged changes
+
+  /commit/submit:
+    post:
+      summary: TTY-bound 终审提交
+      description: |
+        TTY 检测 → manifest 交叉比对 → verify → 交互确认 → basic token → git commit
+      responses:
+        "0":
+          description: 提交成功
+        "1":
+          description: 阻塞原因经 stderr 输出
+
+  /commit-msg-hook:
+    post:
+      summary: 校验提交通路
+      description: |
+        校验链: SPEC_VC_BYPASS? → token 存在+未过期 → subagent-sessions.log 存在+非空 → ADR 引用
+      responses:
+        "0":
+          description: 放行
+        "1":
+          description: 阻塞原因经 stderr 输出
+
+---

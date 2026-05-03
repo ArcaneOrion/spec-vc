@@ -120,27 +120,18 @@ def test_commit_msg_rejects_multiple_tokens(tmp_path: Path):
 
 
 def _write_token(repo: Path):
-    """写入一个有效的 hash chain token 及配套 manifest/audit/test 文件。"""
-    import hashlib
+    """写入一个有效的 basic token（2 行）。"""
     import time
     import uuid
-
-    git_dir = repo / ".git"
-
-    manifest = git_dir / "spec-vc-manifest.json"
-    manifest.write_text('{"staged_files":["README.md"],"dummy":true}')
-    audit = git_dir / "spec-vc-audit-report.json"
-    audit.write_text('{"findings":[],"dummy":true}')
-    test = git_dir / "spec-vc-test-report.json"
-    test.write_text('{"unit_results":[],"dummy":true}')
-
-    manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
-    audit_hash = hashlib.sha256(audit.read_bytes()).hexdigest()
-    test_hash = hashlib.sha256(test.read_bytes()).hexdigest()
-
-    token_path = git_dir / "spec-vc-commit-token"
-    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}\n{manifest_hash}\n{audit_hash}\n{test_hash}"
+    token_path = repo / ".git" / "spec-vc-commit-token"
+    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}"
     token_path.write_text(token_content)
+
+
+def _write_subagent_session(repo: Path):
+    """写入 subagent session log。"""
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    log_path.write_text("2026-05-03T17:00:00+08:00 | Agent | audit subagent\n")
 
 
 def test_commit_msg_blocks_without_token(tmp_path: Path):
@@ -161,6 +152,7 @@ def test_commit_msg_rejects_adr_none_for_code_change(tmp_path: Path):
     (src / "main.py").write_text("print('x')\n")
     subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
     _write_token(repo)
+    _write_subagent_session(repo)
     msg = repo / "msg.txt"
     msg.write_text("feat: x [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
@@ -173,6 +165,7 @@ def test_commit_msg_allows_adr_none_for_docs_change(tmp_path: Path):
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     _write_token(repo)
+    _write_subagent_session(repo)
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
@@ -252,48 +245,46 @@ def test_commit_msg_bypass_log_failure_is_fail_open(tmp_path: Path):
     assert "bypass 日志写入失败" in proc.stderr
 
 
-def test_hook_token_hash_chain_valid(tmp_path: Path):
-    """hash chain token 哈希匹配时 hook 放行并消费 token。"""
+def test_hook_with_subagent_session_passes(tmp_path: Path):
+    """有 token + subagent session 记录时 hook 放行。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     _write_token(repo)
+    _write_subagent_session(repo)
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode == 0, f"hash chain 匹配应放行, stderr={proc.stderr}"
+    assert proc.returncode == 0, f"有 session 记录应放行, stderr={proc.stderr}"
     assert not (repo / ".git" / "spec-vc-commit-token").exists(), "token 应被消费"
 
 
-def test_hook_token_hash_chain_tampered_audit(tmp_path: Path):
-    """篡改 audit report 后 hash chain 校验阻塞。"""
+def test_hook_blocks_without_subagent_session(tmp_path: Path):
+    """有 token 但无 subagent session 记录时 hook 阻塞。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     _write_token(repo)
-    # 篡改 audit report
-    audit_path = repo / ".git" / "spec-vc-audit-report.json"
-    audit_path.write_text('{"tampered":true}')
+    # 不写 subagent session log
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode != 0, "篡改后应阻塞"
-    assert "不匹配" in proc.stderr
+    assert proc.returncode != 0, "无 session 记录应阻塞"
+    assert "subagent" in proc.stderr
 
 
-def test_hook_bypass_skips_hash_chain_validation(tmp_path: Path):
-    """SPEC_VC_BYPASS 非空时完全跳过 token 和 hash chain 校验。"""
+def test_hook_bypass_skips_subagent_session_check(tmp_path: Path):
+    """SPEC_VC_BYPASS 非空时跳过 token + subagent session 检查。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    # 不写 token，不写 manifest/report——bypass 应跳过一切 token 相关校验
     msg = repo / "msg.txt"
     msg.write_text("docs: hotfix [ADR-none]\n")
     proc = _run_with_env(
         repo, "hook", "commit-msg", str(msg),
         extra_env={"SPEC_VC_BYPASS": "hotfix"},
     )
-    assert proc.returncode == 0, f"bypass 应跳过 hash chain 校验, stderr={proc.stderr}"
+    assert proc.returncode == 0, f"bypass 应放行, stderr={proc.stderr}"
     assert (repo / ".git" / "spec-vc-bypass.log").exists()
 
 
@@ -317,39 +308,28 @@ def test_init_merges_existing_claude_settings(tmp_path: Path):
     assert any("spec-vc hook post-tool-use" in h.get("command", "") for entry in merged["hooks"]["PostToolUse"] for h in entry.get("hooks", []))
 
 
-def test_post_tool_use_hook_detects_clarify(tmp_path: Path):
+def test_post_tool_use_hook_records_agent_call(tmp_path: Path):
+    """ADR-009: PostToolUse hook 记录 Agent 调用到 subagent-sessions.log。"""
     repo = init_repo(tmp_path)
-    run(repo, "change", "start", "--adr", "000", "--summary", "重构 CLI")
-    run(repo, "change", "clarify",
-        "--motivation", "简化命名",
-        "--boundary", "只改名不改功能",
-        "--design", "无架构变更",
-        "--implementation", "rename cmd_adr_init to cmd_init",
-        "--verification", "单元测试覆盖",
-        "--rollback", "git revert")
-    hook_input = json.dumps({
-        "tool_name": "Bash",
-        "tool_input": {"command": "spec-vc change clarify --motivation 简化命名 ..."},
-        "tool_output": "doc/arch/plans/ADR-000-plan-001.md\n"
-    })
-    proc = subprocess.run(
-        ["uv", "run", "spec-vc", "hook", "post-tool-use"],
-        input=hook_input, text=True, capture_output=True, cwd=repo, env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
-    )
+    proc = run(repo, "hook", "post-tool-use",
+               "--tool-name", "Agent",
+               "--description", "audit subagent checking commit")
     assert proc.returncode == 0
-    assert "ADR-000 执行方案" in proc.stdout
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert log_path.exists(), "subagent-sessions.log 应该被创建"
+    content = log_path.read_text()
+    assert "Agent" in content
+    assert "audit subagent checking commit" in content
+    # 验证管道分隔格式
+    parts = content.strip().split(" | ")
+    assert len(parts) >= 2, f"日志格式应为 pipe-separated, got: {content}"
+    assert parts[1] == "Agent"
 
 
-def test_post_tool_use_hook_ignores_irrelevant(tmp_path: Path):
+def test_post_tool_use_hook_skips_empty_tool_name(tmp_path: Path):
+    """ADR-009: 无 tool_name 时不写入日志。"""
     repo = init_repo(tmp_path)
-    hook_input = json.dumps({
-        "tool_name": "Bash",
-        "tool_input": {"command": "pytest tests/ -v"},
-        "tool_output": "82 passed"
-    })
-    proc = subprocess.run(
-        ["uv", "run", "spec-vc", "hook", "post-tool-use"],
-        input=hook_input, text=True, capture_output=True, cwd=repo, env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
-    )
+    proc = run(repo, "hook", "post-tool-use")
     assert proc.returncode == 0
-    assert "ADR-000" not in proc.stdout
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert not log_path.exists(), "无 tool_name 时不应创建日志"

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ADR-009 subagent session tracking data shapes",
+  "type": "object",
+  "properties": {
+    "CommitToken": {
+      "type": "object",
+      "description": ".git/spec-vc-commit-token——basic 2-line 格式",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "description": "一次性 token 唯一标识（32 字符 hex）"
+        },
+        "timestamp": {
+          "type": "integer",
+          "description": "Unix 时间戳，300 秒过期"
+        }
+      },
+      "required": ["uuid", "timestamp"]
+    },
+    "SubagentSessionEntry": {
+      "type": "object",
+      "description": ".git/spec-vc-subagent-sessions.log 单行格式",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 时间戳"
+        },
+        "tool_name": {
+          "type": "string",
+          "description": "被调用的工具名称，如 Agent"
+        },
+        "description": {
+          "type": "string",
+          "description": "agent 描述文本"
+        }
+      },
+      "required": ["timestamp", "tool_name"]
+    },
+    "PrepareTimestamp": {
+      "type": "object",
+      "description": ".git/spec-vc-prepare-ts 格式",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "prepare 命令执行时的 ISO 8601 时间戳"
+        }
+      },
+      "required": ["timestamp"]
+    }
+  }
+}
+
+---
