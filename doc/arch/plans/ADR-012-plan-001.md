@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-012
 - **ADR Title**: 门禁消息增强：失败时返回可执行指引而非仅阻塞
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-08T12:28:51
 - **Summary**: 门禁失败时返回可执行指引而非仅阻塞，强化 AI 正确行为意图：commit-msg hook 错误消息增加下一步指引 + SKILL.md 引用；change validate --phase pre 增加 clarify 完整性检查和 ADR→Spec 关联检查
 
@@ -72,12 +72,14 @@ ADR-012 plan-001 剩余 3 项实施完成。代码改动: (1) commit.py check_su
 
 ## Closure Summary
 
-待补充
+完成 commit 协议简化（ADR-011 落地）+ 门禁消息可执行指引（ADR-012 plan-001 全部 8 个目标）：5 处错误消息追加分步指引和 SKILL.md 引用；change validate --phase pre 三项检查（clarify 完整性 / ADR-relevant Spec 就绪 / ADR→Spec 关联提示）；commit prepare 输出列举 4 项 hook 校验项；spec.has_associated_spec / spec.relevant_spec_issues 抽取领域辅助函数；adr.check_adr_continuity + adr_new 编号空洞警告；spec_new 编号与 ADR 对齐。pytest 78/78 通过。plan-002 留作设计草稿，未引入 _active.md 引用链。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-012-plan-001.md
+
 
 ## Risks and Rollback
 
