@@ -4,12 +4,11 @@ import argparse
 from datetime import date
 from pathlib import Path
 import json
-import os
 import re
 import sys
 
 from ._sections import validate_title
-from .adr import list_adrs, next_adr_id, render_adr, read_adr_content
+from .adr import list_adrs, next_adr_id, render_adr, read_adr_content, check_adr_continuity
 from .adr import parse_adr as parse_adr_file
 from .adr import ensure_referenceable as ensure_adr_referenceable
 from .change import (
@@ -32,21 +31,17 @@ from .hooks import run_commit_msg, run_prepare_commit_msg
 from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
-from .commit import (
-    COMMIT_MSG_FILENAME,
-    PREPARE_TS_FILENAME,
-    gather_commit_context,
-    write_commit_message,
-    write_commit_token,
-)
+from .commit import gather_commit_context, write_commit_message
 from .spec import (
     check_spec_readiness,
     create_spec,
     formalize_spec,
+    has_associated_spec,
     list_formal_files,
     list_specs,
     next_spec_id,
     read_spec_full,
+    relevant_spec_issues,
     specs_root as get_specs_root,
     validate_title as validate_spec_title,
 )
@@ -197,6 +192,9 @@ def cmd_adr_new(args: argparse.Namespace) -> int:
     output = adr_dir / f"adr-{adr_id}.md"
     if output.exists():
         raise UsageError(f"目标 ADR 已存在: {output}")
+    gaps = check_adr_continuity(adr_dir)
+    if gaps:
+        print(f"注意: ADR 编号存在空洞: {', '.join(gaps)}", file=sys.stderr)
     author = run_git(repo_root, "config", "user.name", check=False).strip() or "unknown"
     content = render_adr(template_path("adr.md").read_text(), adr_id, title, author)
     output.write_text(content)
@@ -261,12 +259,37 @@ def cmd_change_clarify(args: argparse.Namespace) -> int:
 def cmd_change_validate(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     config = load_config(repo_root)
+    adr_dir = repo_root / config.project.adr_dir
 
     if args.phase == "pre":
+        active = load_active(adr_dir)
+        if active is None:
+            raise UsageError(
+                "当前没有 active change。\n"
+                "下一步：运行 spec-vc change start --adr ADR-NNN --summary \"<本轮变更摘要>\"\n"
+                "详细流程请查看 SKILL.md"
+            )
+
+        if active.stage in {"discover", "clarify"}:
+            question = next_question(adr_dir)
+            if question.missing_fields:
+                print(f"Clarification 未完成 (stage={active.stage})")
+                print("")
+                print("以下字段尚未补齐：")
+                for field in question.missing_fields:
+                    print(f"  - {field}")
+                print("")
+                print("修复步骤：")
+                print("  使用 spec-vc change clarify 一次性补齐 6 个字段：")
+                print("    --motivation / --boundary / --design / --implementation / --verification / --rollback")
+                print("")
+                print("详细流程请查看 SKILL.md")
+                return 1
+
         specs_root = get_specs_root(repo_root, config.spec.dir)
-        issues = check_spec_readiness(specs_root)
+        issues = relevant_spec_issues(specs_root, active.adr_id)
         if issues:
-            print("Spec 就绪检查 - 未通过")
+            print(f"Spec 就绪检查 - 未通过（ADR-{active.adr_id} 关联 Spec）")
             print("")
             print("在进入 implement-ready（代码修改）前，以下 Spec 必须完成：")
             print("")
@@ -276,11 +299,20 @@ def cmd_change_validate(args: argparse.Namespace) -> int:
             print("")
             print("修复步骤：")
             print("  1. 填写 dev-doc.md 中各区块内容")
-            print("  2. 运行 spec-vc spec formalize 生成形式化文件")
+            print("  2. 运行 spec-vc spec formalize <id> --type all 生成形式化文件")
             print("  3. 运行 spec-vc spec check 确认就绪")
+            print("")
+            print("详细流程请查看 SKILL.md")
             return 1
 
-    plan = record_validation(repo_root / config.project.adr_dir, args.phase, args.content)
+        if not has_associated_spec(specs_root, active.adr_id):
+            print(f"提示：ADR-{active.adr_id} 当前没有关联 Spec。")
+            print("如本次变更涉及接口契约/数据形状/行为规则的新增或修改，请先走 Spec 创作协议：")
+            print(f"  spec-vc spec new \"<标题>\" --adr ADR-{active.adr_id}")
+            print("详细流程请查看 SKILL.md")
+            print("")
+
+    plan = record_validation(adr_dir, args.phase, args.content)
     print(plan)
     return 0
 
@@ -400,10 +432,6 @@ def cmd_commit_prepare(args: argparse.Namespace) -> int:
         _print_spec_readiness_issues(ctx.spec_readiness_issues)
         return 1
 
-    from datetime import datetime, timezone
-    ts_path = repo_root / ".git" / PREPARE_TS_FILENAME
-    ts_path.write_text(datetime.now(timezone.utc).isoformat())
-
     if getattr(args, 'message', None):
         write_commit_message(repo_root, args.message)
 
@@ -411,48 +439,13 @@ def cmd_commit_prepare(args: argparse.Namespace) -> int:
 
     if getattr(args, 'message', None):
         print("[spec-vc] commit message 已写入 .git/spec-vc-commit-msg", file=sys.stderr)
-    print("[spec-vc] 请完成审计后由用户在终端运行: spec-vc commit submit", file=sys.stderr)
+    print("[spec-vc] 请完成 subagent 审计后直接 git commit。commit-msg hook 会自动校验：", file=sys.stderr)
+    print("  1. subagent session log 非空（PostToolUse hook 自动记录 Agent 工具调用）", file=sys.stderr)
+    print("  2. ADR 引用合法（[ADR-NNN] 或符合豁免规则的 [ADR-none]）", file=sys.stderr)
+    print("  3. [ADR-NNN 时] plan stage ≥ implement-ready", file=sys.stderr)
+    print("  4. [ADR-NNN 时] Spec 完整（dev-doc 已填写、形式化文件非骨架）", file=sys.stderr)
+    print("详细流程请查看 SKILL.md", file=sys.stderr)
 
-    return 0
-
-
-def cmd_commit_submit(args: argparse.Namespace) -> int:
-    if not os.isatty(sys.stdin.fileno()) and not os.environ.get("SPEC_VC_TEST_TTY_BYPASS"):
-        print("[spec-vc] 此命令仅在真实终端中运行。", file=sys.stderr)
-        print("[spec-vc] 请在终端中输入 spec-vc commit submit 手动提交。", file=sys.stderr)
-        return 1
-
-    repo_root = _repo_root()
-    config = load_config(repo_root)
-    git_dir = repo_root / ".git"
-
-    ctx = gather_commit_context(repo_root, config)
-
-    if not ctx.staged_files:
-        print("(无 staged changes，无需提交)")
-        return 0
-
-    if not os.environ.get("SPEC_VC_TEST_TTY_BYPASS"):
-        try:
-            input("[spec-vc] 按 Enter 确认提交，Ctrl-C 取消... ")
-        except (EOFError, KeyboardInterrupt):
-            print("\n[spec-vc] 提交已取消。", file=sys.stderr)
-            return 1
-
-    write_commit_token(repo_root)
-
-    msg_path = git_dir / COMMIT_MSG_FILENAME
-    try:
-        if msg_path.exists():
-            run_git(repo_root, "commit", "-F", str(msg_path))
-            msg_path.unlink()
-        else:
-            run_git(repo_root, "commit", "-m", getattr(args, 'message', 'commit [ADR-009]'))
-    except SpecVCError as e:
-        print(f"[spec-vc] git commit 失败:\n{e}", file=sys.stderr)
-        return 1
-
-    print("[spec-vc] 提交完成。", file=sys.stderr)
     return 0
 
 
@@ -460,10 +453,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
     if args.subcommand == "prepare":
         return cmd_commit_prepare(args)
 
-    if args.subcommand == "submit":
-        return cmd_commit_submit(args)
-
-    print("[spec-vc] 请指定子命令: prepare, submit", file=sys.stderr)
+    print("[spec-vc] 请指定子命令: prepare", file=sys.stderr)
     return 1
 
 
@@ -483,7 +473,10 @@ def cmd_spec_new(args: argparse.Namespace) -> int:
     ensure_adr_referenceable(adr, adr_id)
 
     title = validate_spec_title(args.title)
-    spec_id = next_spec_id(specs_root)
+    # Spec 编号与 ADR 编号对齐：优先使用 ADR 编号，冲突时顺延
+    spec_id = adr_id
+    if (specs_root / spec_id).exists():
+        spec_id = next_spec_id(specs_root)
     author = run_git(repo_root, "config", "user.name", check=False).strip() or "unknown"
     doc_path = create_spec(specs_root, spec_id, title, author, f"ADR-{adr_id}", template_dir=skill_root() / "templates")
     print(f"Spec-{spec_id}: {title}")
@@ -814,8 +807,6 @@ def build_parser() -> argparse.ArgumentParser:
     commit_prepare.add_argument("--message")
     commit_prepare.add_argument("--format", choices=["json", "text"], default="json")
     commit_prepare.set_defaults(func=cmd_commit)
-    commit_submit = commit_sub.add_parser("submit")
-    commit_submit.set_defaults(func=cmd_commit)
     commit.set_defaults(func=cmd_commit)
 
     skill = sub.add_parser("skill")

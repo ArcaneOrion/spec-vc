@@ -1,0 +1,33 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gate-block-message",
+  "type": "object",
+  "required": ["reason", "next_steps", "reference"],
+  "properties": {
+    "reason": {
+      "type": "string",
+      "description": "阻塞原因的功能性描述"
+    },
+    "next_steps": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "可执行的下一步操作列表，包含具体 CLI 命令"
+    },
+    "reference": {
+      "type": "string",
+      "const": "详细流程请查看 SKILL.md 检查正确流程",
+      "description": "所有门禁消息必须包含此引用"
+    }
+  },
+  "examples": [
+    {
+      "reason": "未找到 subagent 审计记录",
+      "next_steps": ["使用 Agent 工具执行代码审查/测试验证", "PostToolUse hook 会自动记录到 .git/spec-vc-subagent-sessions.log", "如未配置 hook，运行 spec-vc init 重新初始化"],
+      "reference": "详细流程请查看 SKILL.md 检查正确流程"
+    }
+  ]
+}
+```
+
+---

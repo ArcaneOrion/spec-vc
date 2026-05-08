@@ -111,6 +111,41 @@ def test_adr_new_updates_index(tmp_path: Path):
     assert "ADR-001" in readme
 
 
+def test_adr_new_warns_on_id_gap(tmp_path: Path):
+    """ADR-012: 编号存在空洞时 adr new 输出警告。"""
+    repo = init_repo(tmp_path)
+    # seed ADR-000 已存在，先创建 ADR-001 使得 next_adr_id=002
+    run(repo, "adr", "new", "第一个决策")
+    # 然后创建 ADR-002
+    run(repo, "adr", "new", "第二个决策")
+    # 删除 ADR-001 制造空洞：000, 002 存在，001 缺失
+    (repo / "doc" / "arch" / "adr-001.md").unlink()
+    proc = run(repo, "adr", "new", "第三个决策", check=True)
+    assert "编号存在空洞" in proc.stderr
+    # 新 ADR 应该是 003（最大编号+1）
+    assert (repo / "doc" / "arch" / "adr-003.md").exists()
+
+
+def test_spec_new_uses_adr_id(tmp_path: Path):
+    """ADR-012: spec new --adr ADR-012 时 Spec 编号与 ADR 编号对齐。"""
+    repo = init_repo(tmp_path)
+    run(repo, "adr", "new", "测试决策")
+    proc = run(repo, "spec", "new", "测试 Spec", "--adr", "ADR-001", check=True)
+    assert "Spec-001" in proc.stdout
+    assert (repo / "doc" / "arch" / "specs" / "001").is_dir()
+
+
+def test_spec_new_falls_back_on_duplicate(tmp_path: Path):
+    """ADR-012: Spec-001 已存在时用 next_spec_id 顺延。"""
+    repo = init_repo(tmp_path)
+    run(repo, "adr", "new", "测试决策")
+    run(repo, "spec", "new", "第一个 Spec", "--adr", "ADR-001")
+    # 再用同一 ADR 创建，Spec-001 已存在，顺延到 002
+    proc = run(repo, "spec", "new", "第二个 Spec", "--adr", "ADR-001", check=True)
+    assert "Spec-002" in proc.stdout
+    assert (repo / "doc" / "arch" / "specs" / "002").is_dir()
+
+
 def test_commit_msg_rejects_multiple_tokens(tmp_path: Path):
     repo = init_repo(tmp_path)
     msg = repo / "msg.txt"
@@ -119,13 +154,25 @@ def test_commit_msg_rejects_multiple_tokens(tmp_path: Path):
     assert proc.returncode != 0
 
 
-def _write_token(repo: Path):
-    """写入一个有效的 basic token（2 行）。"""
-    import time
-    import uuid
-    token_path = repo / ".git" / "spec-vc-commit-token"
-    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}"
-    token_path.write_text(token_content)
+def test_commit_msg_block_messages_reference_skill_md(tmp_path: Path):
+    """ADR-012: HELP_MISSING / HELP_SLOT 阻塞消息含可执行指引和 SKILL.md 引用。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _write_subagent_session(repo)
+    msg = repo / "msg.txt"
+
+    msg.write_text("docs: no token here\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0
+    assert "[ADR-NNN]" in proc.stderr
+    assert "SKILL.md" in proc.stderr
+
+    msg.write_text("docs: slot [ADR-???]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0
+    assert "[ADR-???]" in proc.stderr
+    assert "SKILL.md" in proc.stderr
 
 
 def _write_subagent_session(repo: Path):
@@ -134,7 +181,8 @@ def _write_subagent_session(repo: Path):
     log_path.write_text("2026-05-03T17:00:00+08:00 | Agent | audit subagent\n")
 
 
-def test_commit_msg_blocks_without_token(tmp_path: Path):
+def test_commit_msg_blocks_without_subagent_session(tmp_path: Path):
+    """无 subagent session 记录时 hook 阻塞。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
@@ -142,7 +190,8 @@ def test_commit_msg_blocks_without_token(tmp_path: Path):
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0
-    assert "未找到提交 token" in proc.stderr
+    assert "未找到 subagent 审计记录" in proc.stderr
+    assert "SKILL.md" in proc.stderr
 
 
 def test_commit_msg_rejects_adr_none_for_code_change(tmp_path: Path):
@@ -151,7 +200,6 @@ def test_commit_msg_rejects_adr_none_for_code_change(tmp_path: Path):
     src.mkdir()
     (src / "main.py").write_text("print('x')\n")
     subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
-    _write_token(repo)
     _write_subagent_session(repo)
     msg = repo / "msg.txt"
     msg.write_text("feat: x [ADR-none]\n")
@@ -164,7 +212,6 @@ def test_commit_msg_allows_adr_none_for_docs_change(tmp_path: Path):
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    _write_token(repo)
     _write_subagent_session(repo)
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
@@ -210,8 +257,8 @@ def test_commit_msg_bypass_env_skips_token_check(tmp_path: Path):
     assert log_content.count(" | ") >= 2
 
 
-def test_commit_msg_bypass_empty_string_falls_back_to_token(tmp_path: Path):
-    """ADR-007: SPEC_VC_BYPASS 空字符串视为未触发，走原 token 校验。"""
+def test_commit_msg_bypass_empty_string_falls_back_to_session_check(tmp_path: Path):
+    """ADR-011: SPEC_VC_BYPASS 空字符串视为未触发，走 subagent session 校验。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
@@ -222,8 +269,7 @@ def test_commit_msg_bypass_empty_string_falls_back_to_token(tmp_path: Path):
         extra_env={"SPEC_VC_BYPASS": ""},
     )
     assert proc.returncode != 0, "空字符串不应触发 bypass"
-    assert "未找到提交 token" in proc.stderr
-    # 错误信息应显式列出 bypass 用法
+    assert "未找到 subagent 审计记录" in proc.stderr
     assert "SPEC_VC_BYPASS" in proc.stderr
 
 
@@ -246,31 +292,29 @@ def test_commit_msg_bypass_log_failure_is_fail_open(tmp_path: Path):
 
 
 def test_hook_with_subagent_session_passes(tmp_path: Path):
-    """有 token + subagent session 记录时 hook 放行。"""
+    """有 subagent session 记录时 hook 放行。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    _write_token(repo)
     _write_subagent_session(repo)
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode == 0, f"有 session 记录应放行, stderr={proc.stderr}"
-    assert not (repo / ".git" / "spec-vc-commit-token").exists(), "token 应被消费"
 
 
 def test_hook_blocks_without_subagent_session(tmp_path: Path):
-    """有 token 但无 subagent session 记录时 hook 阻塞。"""
+    """无 subagent session 记录时 hook 阻塞。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    _write_token(repo)
     # 不写 subagent session log
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0, "无 session 记录应阻塞"
     assert "subagent" in proc.stderr
+    assert "SKILL.md" in proc.stderr
 
 
 def test_hook_bypass_skips_subagent_session_check(tmp_path: Path):
@@ -286,6 +330,87 @@ def test_hook_bypass_skips_subagent_session_check(tmp_path: Path):
     )
     assert proc.returncode == 0, f"bypass 应放行, stderr={proc.stderr}"
     assert (repo / ".git" / "spec-vc-bypass.log").exists()
+
+
+def _setup_active_change(repo: Path) -> None:
+    """创建一个 active change (clarify stage) 用于 plan stage 测试。"""
+    run(repo, "change", "start", "--adr", "000", "--summary", "测试变更")
+
+
+def _complete_clarify(repo: Path) -> None:
+    """完成 clarify 所有字段，推进到 plan stage。"""
+    run(repo, "change", "clarify",
+        "--motivation", "测试动机",
+        "--boundary", "测试边界",
+        "--design", "测试设计",
+        "--implementation", "测试实现",
+        "--verification", "测试验证",
+        "--rollback", "测试回滚")
+
+
+def test_hook_blocks_adr_with_plan_stage_below_implement_ready(tmp_path: Path):
+    """ADR-011: plan stage 为 clarify 时，[ADR-NNN] 提交被 hook 阻塞。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _setup_active_change(repo)
+    _write_subagent_session(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0, "clarify stage 应阻塞提交"
+    assert "implement-ready" in proc.stderr
+    assert "SKILL.md" in proc.stderr
+
+
+def test_hook_allows_adr_at_implement_ready_stage(tmp_path: Path):
+    """ADR-011: plan stage >= implement-ready 时，[ADR-NNN] 提交放行。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _setup_active_change(repo)
+    _complete_clarify(repo)
+    # validate --phase pre → implement-ready
+    run(repo, "change", "validate", "--phase", "pre", "--content", "修改前验证通过")
+    _write_subagent_session(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode == 0, f"implement-ready stage 应放行, stderr={proc.stderr}"
+
+
+def test_hook_allows_adr_without_active_change(tmp_path: Path):
+    """ADR-011: ADR 引用正确但无 active change 时放行（变更流程已关闭或不同提交）。"""
+    repo = init_repo(tmp_path)
+    (repo / "doc" / "arch" / "README.md").write_text("change\n")
+    subprocess.run(["git", "add", "doc/arch/README.md"], cwd=repo, check=True)
+    # 不创建 active change — 模拟变更已关闭后的追加提交
+    _write_subagent_session(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode == 0, f"无 active change 时应放行, stderr={proc.stderr}"
+
+
+def test_hook_blocks_adr_with_incomplete_spec_includes_skill_md(tmp_path: Path):
+    """ADR-012: ADR 关联 Spec 不就绪时 hook 阻塞且消息含修复步骤 + SKILL.md 引用。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _setup_active_change(repo)
+    _complete_clarify(repo)
+    # 此时无关联 Spec，pre-validation 直接通过推进到 implement-ready
+    run(repo, "change", "validate", "--phase", "pre", "--content", "通过")
+    # 推进到 implement-ready 后再创建关联 Spec 但不填写
+    run(repo, "spec", "new", "测试 Spec", "--adr", "ADR-000")
+    _write_subagent_session(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0, "未就绪 Spec 应阻塞"
+    assert "Spec 未完成" in proc.stderr
+    assert "spec formalize" in proc.stderr
+    assert "SKILL.md" in proc.stderr
 
 
 def test_status_fails_on_invalid_rev_range(tmp_path: Path):

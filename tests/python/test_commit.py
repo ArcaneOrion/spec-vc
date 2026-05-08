@@ -71,14 +71,6 @@ def test_commit_prepare_writes_commit_msg(tmp_path: Path):
     assert "feat(core): test [ADR-000]" in msg_path.read_text()
 
 
-def test_commit_prepare_writes_prepare_ts(tmp_path: Path):
-    repo = init_repo(tmp_path)
-    _stage_src_file(repo)
-    proc = run(repo, "commit", "prepare")
-    assert proc.returncode == 0
-    ts_path = repo / ".git" / "spec-vc-prepare-ts"
-    assert ts_path.exists()
-    assert ts_path.read_text().strip() != ""
 
 
 def test_commit_prepare_no_manifest_generated(tmp_path: Path):
@@ -88,6 +80,19 @@ def test_commit_prepare_no_manifest_generated(tmp_path: Path):
     proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
     assert not (repo / ".git" / "spec-vc-manifest.json").exists()
+
+
+def test_commit_prepare_lists_hook_checks(tmp_path: Path):
+    """ADR-012: commit prepare 输出列举 4 项 hook 校验项 + SKILL.md 引用。"""
+    repo = init_repo(tmp_path)
+    _stage_src_file(repo)
+    proc = run(repo, "commit", "prepare")
+    assert proc.returncode == 0
+    assert "subagent session log" in proc.stderr
+    assert "ADR 引用" in proc.stderr
+    assert "plan stage" in proc.stderr
+    assert "Spec" in proc.stderr
+    assert "SKILL.md" in proc.stderr
 
 
 def test_commit_with_spec_files(tmp_path: Path):

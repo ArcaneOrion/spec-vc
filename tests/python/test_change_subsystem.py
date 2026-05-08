@@ -243,6 +243,63 @@ def test_change_validate_pre_blocks_on_incomplete_specs(tmp_path: Path):
     assert 'Spec 就绪检查' in proc.stdout
     assert '未通过' in proc.stdout
     assert 'dev-doc.md' in proc.stdout
+    assert 'SKILL.md' in proc.stdout
+
+
+def test_change_validate_pre_blocks_on_incomplete_clarify(tmp_path: Path):
+    """ADR-012: clarify 字段未补齐时 validate --phase pre 阻塞并打印缺失字段。"""
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '测试')
+    # 不调 clarify，stage 仍为 clarify，所有字段为"待补充"
+    proc = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '尝试推进')
+    assert proc.returncode == 1
+    assert 'Clarification 未完成' in proc.stdout
+    assert 'motivation' in proc.stdout
+    assert 'spec-vc change clarify' in proc.stdout
+    assert 'SKILL.md' in proc.stdout
+
+
+def test_change_validate_pre_skips_unrelated_spec_issues(tmp_path: Path):
+    """ADR-012: pre-validation 仅检查当前 ADR 关联的 Spec，无关 ADR 的 Spec 不影响。"""
+    repo = init_repo(tmp_path)
+    # 创建 ADR-001 + 关联未就绪 Spec-001（与本变更无关）
+    run(repo, 'adr', 'new', '决策一')
+    run(repo, 'spec', 'new', 'Spec 一', '--adr', 'ADR-001')
+    # 当前 active 关联 ADR-000，与 Spec-001 无关
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '测试')
+    run(
+        repo,
+        'change', 'clarify',
+        '--motivation', '明确改动目标',
+        '--boundary', '只改 hooks',
+        '--design', '不变',
+        '--implementation', '步骤',
+        '--verification', '验证',
+        '--rollback', '回滚',
+    )
+    proc = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '通过')
+    assert proc.returncode == 0, f'无关 Spec 不应阻塞，stdout={proc.stdout}'
+
+
+def test_change_validate_pre_warns_when_adr_has_no_spec(tmp_path: Path):
+    """ADR-012: ADR 无关联 Spec 时 pre-validation 给出提示但不阻塞。"""
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '测试')
+    run(
+        repo,
+        'change', 'clarify',
+        '--motivation', '明确改动目标',
+        '--boundary', '只改 hooks',
+        '--design', '不变',
+        '--implementation', '步骤',
+        '--verification', '验证',
+        '--rollback', '回滚',
+    )
+    proc = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '通过')
+    assert proc.returncode == 0
+    assert '没有关联 Spec' in proc.stdout
+    assert 'spec new' in proc.stdout
+    assert 'SKILL.md' in proc.stdout
 
 
 def test_change_validate_pre_passes_with_ready_specs(tmp_path: Path):
@@ -259,8 +316,8 @@ def test_change_validate_pre_passes_with_ready_specs(tmp_path: Path):
         '--rollback', '可能破坏旧工作流，需要保留 e2e',
     )
     run(repo, 'spec', 'new', '用户认证', '--adr', 'ADR-000')
-    # 填写 dev-doc
-    base = repo / 'doc' / 'arch' / 'specs' / '001'
+    # 填写 dev-doc（Spec 编号与 ADR-000 对齐为 000）
+    base = repo / 'doc' / 'arch' / 'specs' / '000'
     doc = (base / 'dev-doc.md').read_text()
     import re as _re
 
@@ -275,7 +332,7 @@ def test_change_validate_pre_passes_with_ready_specs(tmp_path: Path):
     doc = _replace_sec(doc, "测试策略", "验收标准: 登录成功返回 200。")
     doc = _replace_sec(doc, "日志实现", "INFO 级别记录登录事件，包含 user_id 和 trace_id。")
     (base / 'dev-doc.md').write_text(doc)
-    run(repo, 'spec', 'formalize', '001', '--type', 'all')
+    run(repo, 'spec', 'formalize', '000', '--type', 'all')
 
     proc = run(repo, 'change', 'validate', '--phase', 'pre', '--content', '修改前验证')
     assert proc.returncode == 0

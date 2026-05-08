@@ -42,9 +42,9 @@ def test_spec_new_creates_subdir_and_files(tmp_path: Path):
     repo = init_repo(tmp_path)
     proc = run(repo, "spec", "new", "用户认证接口契约", "--adr", "ADR-000")
     assert proc.returncode == 0
-    assert "Spec-001" in proc.stdout
+    assert "Spec-000" in proc.stdout
 
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     assert base.is_dir()
     assert (base / "dev-doc.md").exists()
     assert (base / "contract.openapi.yaml").exists()
@@ -52,7 +52,7 @@ def test_spec_new_creates_subdir_and_files(tmp_path: Path):
     assert (base / "behavior.feature").exists()
 
     content = (base / "dev-doc.md").read_text()
-    assert "Spec-001" in content
+    assert "Spec-000" in content
     assert "用户认证接口契约" in content
     assert "ADR-000" in content
 
@@ -82,7 +82,7 @@ def test_spec_list_shows_specs(tmp_path: Path):
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
     proc = run(repo, "spec", "list")
     assert proc.returncode == 0
-    assert "Spec-001" in proc.stdout
+    assert "Spec-000" in proc.stdout
     assert "用户认证" in proc.stdout
     assert "Draft" in proc.stdout
     assert "ADR-000" in proc.stdout
@@ -91,7 +91,7 @@ def test_spec_list_shows_specs(tmp_path: Path):
 def test_spec_show_displays_dev_doc(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    proc = run(repo, "spec", "show", "001")
+    proc = run(repo, "spec", "show", "000")
     assert proc.returncode == 0
     assert "用户认证" in proc.stdout
     assert "ADR-000" in proc.stdout
@@ -108,11 +108,13 @@ def test_spec_show_rejects_nonexistent(tmp_path: Path):
 
 
 def test_spec_id_increments(tmp_path: Path):
+    """第二个 Spec 用同一 ADR 时，编号顺延到下一个可用值。"""
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "第一个", "--adr", "ADR-000")
     run(repo, "spec", "new", "第二个", "--adr", "ADR-000")
+    assert (repo / "doc" / "arch" / "specs" / "000").is_dir()
+    # Spec-000 已存在，同 ADR 再创建时顺延到 001
     assert (repo / "doc" / "arch" / "specs" / "001").is_dir()
-    assert (repo / "doc" / "arch" / "specs" / "002").is_dir()
 
 
 def _fill_sections(doc: str) -> str:
@@ -140,11 +142,11 @@ def _fill_sections(doc: str) -> str:
 def test_spec_formalize_extracts_openapi(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     doc = _fill_sections((base / "dev-doc.md").read_text())
     (base / "dev-doc.md").write_text(doc)
 
-    proc = run(repo, "spec", "formalize", "001", "--type", "openapi")
+    proc = run(repo, "spec", "formalize", "000", "--type", "openapi")
     assert proc.returncode == 0
     assert "contract.openapi.yaml" in proc.stdout
     out = (base / "contract.openapi.yaml").read_text()
@@ -155,7 +157,7 @@ def test_spec_formalize_rejects_empty_section(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
     # 新模板有结构化占位内容，需显式清空区块来测试拒绝逻辑
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     doc = (base / "dev-doc.md").read_text()
     import re as _re
     def _clear_sec(text: str, name: str) -> str:
@@ -163,7 +165,7 @@ def test_spec_formalize_rejects_empty_section(tmp_path: Path):
         return pat.sub(r"\1待补充\n\n", text, count=1)
     doc = _clear_sec(doc, "接口契约")
     (base / "dev-doc.md").write_text(doc)
-    proc = run(repo, "spec", "formalize", "001", "--type", "openapi")
+    proc = run(repo, "spec", "formalize", "000", "--type", "openapi")
     assert proc.returncode != 0
     assert "无法生成" in proc.stderr
 
@@ -171,11 +173,11 @@ def test_spec_formalize_rejects_empty_section(tmp_path: Path):
 def test_spec_formalize_all_types(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     doc = _fill_sections((base / "dev-doc.md").read_text())
     (base / "dev-doc.md").write_text(doc)
 
-    proc = run(repo, "spec", "formalize", "001", "--type", "all")
+    proc = run(repo, "spec", "formalize", "000", "--type", "all")
     assert proc.returncode == 0
     for fname in ["contract.openapi.yaml", "schema.json", "behavior.feature"]:
         assert (base / fname).stat().st_size > 0
@@ -184,7 +186,7 @@ def test_spec_formalize_all_types(tmp_path: Path):
 def test_spec_show_accepts_spec_prefix(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    proc = run(repo, "spec", "show", "Spec-001")
+    proc = run(repo, "spec", "show", "Spec-000")
     assert proc.returncode == 0
     assert "用户认证" in proc.stdout
 
@@ -195,7 +197,7 @@ def test_skill_load_includes_spec_context(tmp_path: Path):
     proc = run(repo, "skill", "load")
     assert proc.returncode == 0
     assert "spec_count: 1" in proc.stdout
-    assert "recent Spec-001" in proc.stdout
+    assert "recent Spec-000" in proc.stdout
 
 
 def test_skill_load_zero_specs(tmp_path: Path):
@@ -208,10 +210,10 @@ def test_skill_load_zero_specs(tmp_path: Path):
 def test_spec_check_all_ready(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     doc = _fill_sections((base / "dev-doc.md").read_text())
     (base / "dev-doc.md").write_text(doc)
-    run(repo, "spec", "formalize", "001", "--type", "all")
+    run(repo, "spec", "formalize", "000", "--type", "all")
 
     proc = run(repo, "spec", "check")
     assert proc.returncode == 0
@@ -231,7 +233,7 @@ def test_spec_check_empty_dev_doc_sections(tmp_path: Path):
 def test_spec_check_skeleton_formal_files(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     doc = _fill_sections((base / "dev-doc.md").read_text())
     (base / "dev-doc.md").write_text(doc)
     # formal files not generated — still skeleton
@@ -265,14 +267,14 @@ def test_commit_passes_with_ready_specs(tmp_path: Path):
     subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
 
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     doc = _fill_sections((base / "dev-doc.md").read_text())
     (base / "dev-doc.md").write_text(doc)
-    run(repo, "spec", "formalize", "001", "--type", "all")
+    run(repo, "spec", "formalize", "000", "--type", "all")
 
     proc = run(repo, "commit", "prepare")
     assert proc.returncode == 0
-    assert "Spec-001" in proc.stderr
+    assert "Spec-000" in proc.stderr
     # ADR-010: stdout no longer contains manifest JSON
 
 
@@ -301,12 +303,12 @@ def test_adr_show_accepts_adr_prefix(tmp_path: Path):
 def test_spec_show_formal_displays_content(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, "spec", "new", "用户认证", "--adr", "ADR-000")
-    base = repo / "doc" / "arch" / "specs" / "001"
+    base = repo / "doc" / "arch" / "specs" / "000"
     doc = _fill_sections((base / "dev-doc.md").read_text())
     (base / "dev-doc.md").write_text(doc)
-    run(repo, "spec", "formalize", "001", "--type", "all")
+    run(repo, "spec", "formalize", "000", "--type", "all")
 
-    proc = run(repo, "spec", "show", "001", "--formal")
+    proc = run(repo, "spec", "show", "000", "--formal")
     assert proc.returncode == 0
     assert "用户认证" in proc.stdout
     assert "[contract.openapi.yaml]" in proc.stdout

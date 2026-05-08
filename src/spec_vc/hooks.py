@@ -7,8 +7,8 @@ from pathlib import Path
 import re
 
 from .adr import ensure_referenceable, exemption_allows, parse_adr
-from .commit import validate_and_consume_token
-from .config import load_config
+from .commit import SUBAGENT_SESSIONS_FILENAME, check_subagent_session
+from .config import Config, load_config
 from .errors import ValidationError
 from .gitops import repo_root_from, staged_diff_numstat, staged_files
 
@@ -18,7 +18,71 @@ EXACT_NONE_RE = re.compile(r"\[ADR-none\]")
 EXACT_NUM_RE = re.compile(r"\[ADR-(\d{3,})\]")
 
 BYPASS_LOG_FILENAME = "spec-vc-bypass.log"
-SUBAGENT_SESSIONS_FILENAME = "spec-vc-subagent-sessions.log"
+ACTIVE_FILE_NAME = "_active.md"
+PLAN_DIR_NAME = "plans"
+
+IMPLEMENT_READY_OR_LATER = {"implement-ready", "validate", "close"}
+
+
+def _load_active_stage(adr_dir: Path, adr_id: str) -> str | None:
+    """读取 active change 的 stage，无 active change 时返回 None。"""
+    active_path = adr_dir / PLAN_DIR_NAME / ACTIVE_FILE_NAME
+    if not active_path.exists():
+        return None
+    text = active_path.read_text()
+    for line in text.splitlines():
+        if line.startswith("- **Stage**:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _check_plan_stage(repo_root: Path, config: Config, adr_id: str) -> None:
+    """检查 ADR 对应的变更计划 stage ≥ implement-ready。
+
+    仅在有 active change 时检查。如果变更已关闭（无 active change），
+    说明流程已走完，不阻塞提交。
+    """
+    adr_dir = repo_root / config.project.adr_dir
+    stage = _load_active_stage(adr_dir, adr_id)
+    if stage is not None and stage not in IMPLEMENT_READY_OR_LATER:
+        raise ValidationError(
+            f"[spec-vc] Commit 被阻塞: ADR-{adr_id} 的变更计划 stage 为 '{stage}'，"
+            f"需推进到 implement-ready 才能提交。\n"
+            f"下一步：运行 spec-vc change validate --phase pre --content \"<前置验证内容>\" "
+            f"完成前置验证后推进到 implement-ready。\n"
+            f"详细流程请查看 SKILL.md"
+        )
+
+
+def _check_spec_readiness_for_adr(repo_root: Path, config: Config, adr_id: str) -> None:
+    """检查 ADR 关联的 Spec 是否完整（非骨架）。
+
+    仅在 Spec 目录存在时检查。如果 ADR 没有关联 Spec，不阻塞。
+    """
+    from .spec import relevant_spec_issues, specs_root as get_specs_root
+
+    specs_root = get_specs_root(repo_root, config.spec.dir)
+    if not specs_root.exists():
+        return
+
+    issues = relevant_spec_issues(specs_root, adr_id)
+    if not issues:
+        return
+
+    lines = [
+        f"[spec-vc] Commit 被阻塞: ADR-{adr_id} 关联的 Spec 未完成:",
+    ]
+    for issue in issues:
+        lines.append(f"  Spec-{issue.spec_id} / {issue.location}")
+        lines.append(f"    → {issue.problem}")
+    lines.append("")
+    lines.append("修复步骤:")
+    lines.append("  1. 填写 dev-doc.md 中各区块内容（概述/接口契约/数据形状/行为规则/测试策略/日志实现）")
+    lines.append("  2. 运行 spec-vc spec formalize <id> --type all 生成形式化文件")
+    lines.append("  3. 运行 spec-vc spec check 确认就绪")
+    lines.append("")
+    lines.append("详细流程请查看 SKILL.md")
+    raise ValidationError("\n".join(lines))
 
 
 def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "") -> int:
@@ -36,8 +100,16 @@ def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "
     return 0
 
 
-HELP_MISSING = """[spec-vc] Commit 被阻塞:subject 必须包含且只能包含一个 [ADR-NNN] 或 [ADR-none]"""
-HELP_SLOT = """[spec-vc] Commit 被阻塞:检测到未填充的槽位 [ADR-???]"""
+HELP_MISSING = (
+    "[spec-vc] Commit 被阻塞:subject 必须包含且只能包含一个 [ADR-NNN] 或 [ADR-none]\n"
+    "下一步：在 commit subject 末尾追加 [ADR-NNN]（具体决策）或 [ADR-none]（豁免，仅限不影响架构的改动）\n"
+    "详细流程请查看 SKILL.md"
+)
+HELP_SLOT = (
+    "[spec-vc] Commit 被阻塞:检测到未填充的槽位 [ADR-???]\n"
+    "下一步：将 [ADR-???] 替换为具体 [ADR-NNN] 或 [ADR-none]\n"
+    "详细流程请查看 SKILL.md"
+)
 
 
 def _subject(message_file: Path) -> str:
@@ -75,8 +147,8 @@ def run_commit_msg(message_file: Path) -> int:
         _try_write_bypass_log(repo_root, bypass_reason, subject)
     else:
         try:
-            validate_and_consume_token(repo_root)
-        except (FileNotFoundError, ValueError, TimeoutError) as e:
+            check_subagent_session(repo_root)
+        except FileNotFoundError as e:
             raise ValidationError(str(e)) from e
 
     if any(token.startswith("ADR-?") for token in tokens):
@@ -102,6 +174,11 @@ def run_commit_msg(message_file: Path) -> int:
         raise ValidationError(f"[spec-vc] Commit 被阻塞:引用的 ADR 不存在: ADR-{adr_id}")
     adr = parse_adr(adr_file)
     ensure_referenceable(adr, adr_id)
+
+    # [ADR-NNN] 额外检查: plan stage ≥ implement-ready + Spec 完整性
+    _check_plan_stage(repo_root, config, adr_id)
+    _check_spec_readiness_for_adr(repo_root, config, adr_id)
+
     return 0
 
 

@@ -74,6 +74,20 @@ def next_adr_id(adr_dir: Path) -> str:
     return f"{max_id + 1:03d}"
 
 
+def check_adr_continuity(adr_dir: Path) -> list[str]:
+    """检查 ADR 编号连续性，返回空洞编号列表。"""
+    existing_ids = set()
+    for path in adr_dir.glob("adr-*.md"):
+        match = re.match(r"adr-(\d+)\.md$", path.name)
+        if match:
+            existing_ids.add(int(match.group(1)))
+    if not existing_ids:
+        return []
+    max_id = max(existing_ids)
+    gaps = [f"{i:03d}" for i in range(max_id + 1) if i not in existing_ids]
+    return gaps
+
+
 
 def render_adr(template: str, adr_id: str, title: str, author: str) -> str:
     rendered = template.replace("{{NUMBER}}", adr_id)

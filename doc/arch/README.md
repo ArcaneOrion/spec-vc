@@ -34,6 +34,8 @@
 | ADR-008 | 引入 TTY-bound commit 机制，将 spec-vc commit 拆分为 prepare/submit 两阶段 | Proposed | 2026-05-03 |
 | ADR-009 | 引入 PostToolUse hook subagent 调用追踪机制，确保 commit 前必须经过 subagent 审计 | Proposed | 2026-05-03 |
 | ADR-010 | 简化提交流程：移除机械 manifest/audit-report/test-report/verify 层，保留 PostToolUse hook 证据链 | Proposed | 2026-05-03 |
+| ADR-011 | 移除 commit submit 阶段，简化为 prepare + hook 校验循环 | Accepted | 2026-05-08 |
+| ADR-012 | 门禁消息增强：失败时返回可执行指引而非仅阻塞 | Proposed | 2026-05-08 |
 
 ## 状态图例
 

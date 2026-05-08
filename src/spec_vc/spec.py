@@ -299,6 +299,24 @@ def check_spec_readiness(specs_root: Path) -> list[SpecReadinessIssue]:
     return issues
 
 
+def has_associated_spec(specs_root: Path, adr_id: str) -> bool:
+    """判断给定 ADR 是否有关联的 Spec。"""
+    if not specs_root.exists():
+        return False
+    return any(s.adr_ref == f"ADR-{adr_id}" for s in list_specs(specs_root))
+
+
+def relevant_spec_issues(specs_root: Path, adr_id: str) -> list[SpecReadinessIssue]:
+    """仅返回与指定 ADR 关联的 Spec 的就绪问题，避免跨变更误伤。"""
+    if not specs_root.exists():
+        return []
+    issues = check_spec_readiness(specs_root)
+    relevant_ids = {
+        s.spec_id for s in list_specs(specs_root) if s.adr_ref == f"ADR-{adr_id}"
+    }
+    return [i for i in issues if i.spec_id in relevant_ids]
+
+
 def formalize_spec(
     specs_root: Path,
     spec_id: str,

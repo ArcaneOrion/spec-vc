@@ -2,17 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import time
-import uuid
 
 from .config import Config
 from .gitops import run_git, staged_files
 
-TOKEN_TTL_SECONDS = 300
-TOKEN_FILENAME = "spec-vc-commit-token"
 COMMIT_MSG_FILENAME = "spec-vc-commit-msg"
 SUBAGENT_SESSIONS_FILENAME = "spec-vc-subagent-sessions.log"
-PREPARE_TS_FILENAME = "spec-vc-prepare-ts"
 
 
 def write_commit_message(repo_root: Path, message: str) -> Path:
@@ -21,56 +16,20 @@ def write_commit_message(repo_root: Path, message: str) -> Path:
     return msg_path
 
 
-def write_commit_token(repo_root: Path) -> Path:
-    """在 .git 目录写入一次性提交 token（basic 2 行格式），返回 token 文件路径。"""
+def check_subagent_session(repo_root: Path) -> None:
+    """检查 subagent session log 存在且非空，否则阻塞提交。"""
     git_dir = repo_root / ".git"
-    token_path = git_dir / TOKEN_FILENAME
-    token_content = f"{uuid.uuid4().hex}\n{int(time.time())}"
-    token_path.write_text(token_content)
-    return token_path
-
-
-def validate_and_consume_token(repo_root: Path) -> None:
-    """校验 token 存在且未过期、subagent session 有记录，通过后消费 token。"""
-    git_dir = repo_root / ".git"
-    token_path = git_dir / TOKEN_FILENAME
-
-    if not token_path.exists():
-        raise FileNotFoundError(
-            "未找到提交 token。请通过 spec-vc commit prepare + subagent 审计 + submit 流程提交代码，"
-            "不要直接使用 git commit。\n"
-            "紧急情况下可临时绕过（会写审计日志至 .git/spec-vc-bypass.log）：\n"
-            "  SPEC_VC_BYPASS=<原因> git commit ..."
-        )
-
-    content = token_path.read_text().strip()
-    lines = content.split("\n")
-    if len(lines) < 2:
-        token_path.unlink()
-        raise ValueError("token 格式无效，请重新执行 spec-vc commit prepare + submit")
-
-    try:
-        token_ts = int(lines[1])
-    except ValueError:
-        token_path.unlink()
-        raise ValueError("token 格式无效，请重新执行 spec-vc commit prepare + submit")
-
-    if time.time() - token_ts > TOKEN_TTL_SECONDS:
-        token_path.unlink()
-        raise TimeoutError(
-            f"提交 token 已过期（有效期 {TOKEN_TTL_SECONDS // 60} 分钟），"
-            "请重新执行 spec-vc commit prepare + submit"
-        )
-
     session_log = git_dir / SUBAGENT_SESSIONS_FILENAME
     if not session_log.exists() or session_log.read_text().strip() == "":
         raise FileNotFoundError(
-            "未找到 subagent 审计记录。请先通过 spec-vc commit prepare 写入 commit-msg，"
-            "然后由 AI 执行 subagent 审计流程，最后在终端运行 spec-vc commit submit。\n"
-            "如果 PostToolUse hook 未配置，请运行 spec-vc init 重新初始化。"
+            "未找到 subagent 审计记录。\n"
+            "下一步：使用 Agent 工具执行代码/规格审计，PostToolUse hook 会自动记录到 "
+            ".git/spec-vc-subagent-sessions.log。\n"
+            "如未配置 hook，运行 spec-vc init 自动注入 .claude/settings.json。\n"
+            "紧急情况下可临时绕过（会写审计日志至 .git/spec-vc-bypass.log）：\n"
+            "  SPEC_VC_BYPASS=<原因> git commit ...\n"
+            "详细流程请查看 SKILL.md"
         )
-
-    token_path.unlink()
 
 
 @dataclass
