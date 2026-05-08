@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-013
 - **ADR Title**: hook 校验链补完：adr_id 路由与 session log 时间戳新鲜度
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-08T14:00:57
 - **Summary**: hook 校验链补完：_load_active_stage 按 adr_id 路由 + commit-msg hook 增加 session log 时间戳新鲜度 + PostToolUse 空 description 跳过
 
@@ -72,12 +72,14 @@ ADR-013 plan-001 全部 3 项实施完成。代码改动：(1) hooks.py: _load_a
 
 ## Closure Summary
 
-待补充
+完成 ADR-013 plan-001 全部 3 项：(1) hooks._load_active_stage 重写为 _load_stage_for_adr 按 adr_id 路由（active 匹配 / plan 文件 fallback / 无 plan 返回 None）；(2) commit.check_session_log_freshness 新增，commit-msg mtime 与 session log 末行时间戳比较；(3) run_post_tool_use 跳过空 description 写入。pytest 88/88 全过。收尾时发现 change.append_adr_summary 在 commits_line 以数字开头时触发 invalid group reference（与 ADR-005 修过同类 bug），同 commit 一并修复并补回归测试，pytest 89/89。完整防御链生效需用户运行 uv sync --project ~/.claude/skills/spec-vc 让 PostToolUse hook 部署新版（含空 description 跳过）。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-013-plan-001.md
+
 
 ## Risks and Rollback
 

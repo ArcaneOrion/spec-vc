@@ -172,6 +172,49 @@ def test_change_validate_writes_pre_and_post(tmp_path: Path):
     assert '修改后再次运行 pytest 和 e2e' in plan
 
 
+def test_change_close_handles_digit_prefixed_commit_hash(tmp_path: Path):
+    """ADR-013 收尾发现：commit hash 以数字开头时 close 不应触发 invalid group reference。
+
+    Regression: append_adr_summary 用 rf'\\1{commits_line}'，commits_line 以 "8..."
+    开头时 \\1 + "8..." 被解析为 \\18 group reference 18。
+    """
+    repo = init_repo(tmp_path)
+    run(repo, 'change', 'start', '--adr', '000', '--summary', '回归测试')
+    run(
+        repo,
+        'change', 'clarify',
+        '--motivation', '动机', '--boundary', '边界',
+        '--design', '设计', '--implementation', '实现',
+        '--verification', '验证', '--rollback', '回滚',
+    )
+    run(repo, 'change', 'validate', '--phase', 'pre', '--content', '通过')
+    run(repo, 'change', 'validate', '--phase', 'post', '--content', '通过')
+    # 在 close 前制造一个引用 [ADR-000] 且 hash 以数字开头的 commit
+    (repo / 'note.md').write_text('test\n')
+    subprocess.run(['git', 'add', 'note.md'], cwd=repo, check=True)
+    subprocess.run(
+        ['git', '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'test: 数字开头 hash [ADR-000]'],
+        cwd=repo, check=True,
+    )
+    log = subprocess.run(['git', 'log', '--format=%h'], cwd=repo, text=True, capture_output=True, check=True)
+    head_hash = log.stdout.splitlines()[0]
+    # 强制重做 commit 直到 hash 以数字开头（git hash 是 hex，~63% 概率以数字开头）
+    while not head_hash[0].isdigit():
+        (repo / 'note.md').write_text(f'salt-{head_hash}\n')
+        subprocess.run(['git', 'add', 'note.md'], cwd=repo, check=True)
+        subprocess.run(
+            ['git', '-c', 'core.hooksPath=/dev/null', 'commit', '--amend', '--no-edit'],
+            cwd=repo, check=True,
+        )
+        log = subprocess.run(['git', 'log', '--format=%h'], cwd=repo, text=True, capture_output=True, check=True)
+        head_hash = log.stdout.splitlines()[0]
+    proc = run(repo, 'change', 'close', '--summary', '完成回归用例')
+    assert proc.returncode == 0, f'close 应正常完成不触发 group reference 错误, stderr={proc.stderr}'
+    adr = (repo / 'doc' / 'arch' / 'adr-000.md').read_text()
+    assert '## Implementation Plans' in adr
+    assert head_hash in adr
+
+
 def test_change_close_backfills_adr_and_refs(tmp_path: Path):
     repo = init_repo(tmp_path)
     run(repo, 'change', 'start', '--adr', '000', '--summary', '第一次')

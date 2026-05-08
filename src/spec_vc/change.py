@@ -395,13 +395,23 @@ def append_adr_summary(repo_root: Path, adr_dir: Path, active: ActiveChange) -> 
         ]
     )
     if "## Implementation Plans" in adr_text:
-        adr_text = re.sub(r"## Implementation Plans\n\n.*?(?=\n## |\Z)", block.strip() + "\n", adr_text, flags=re.S)
+        adr_text = re.sub(
+            r"## Implementation Plans\n\n.*?(?=\n## |\Z)",
+            lambda _m: block.strip() + "\n",
+            adr_text,
+            flags=re.S,
+        )
     else:
         if "## References" in adr_text:
             adr_text = adr_text.replace("## References", block + "## References", 1)
         else:
             adr_text = adr_text.rstrip() + "\n\n" + block
-    adr_text = re.sub(r"(- \*\*Commits\*\*: ).*$", rf"\1{commits_line}", adr_text, flags=re.M)
+    adr_text = re.sub(
+        r"(- \*\*Commits\*\*: ).*$",
+        lambda m: m.group(1) + commits_line,
+        adr_text,
+        flags=re.M,
+    )
     adr_path.write_text(adr_text)
     return adr_path
 
