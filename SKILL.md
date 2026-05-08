@@ -182,20 +182,22 @@ hook 在 `git commit` 时自动触发，校验链：
 
 1. SPEC_VC_BYPASS 非空 → 写 bypass 审计日志，跳到 ADR 引用校验
 2. 检查 `.git/spec-vc-subagent-sessions.log` 存在且非空 → 否则阻塞
-3. ADR 引用校验：
+3. **session log 时间戳新鲜度检查（ADR-013）**：若 `.git/spec-vc-commit-msg` 存在，要求 session log 末行时间戳 > commit-msg mtime（证明审计在 prepare 之后发生，避免历史日志被复用）。无 commit-msg（用户未走 prepare）则跳过此检查
+4. ADR 引用校验：
    - 无 `[ADR-NNN]`/`[ADR-none]` → 阻塞
    - `[ADR-???]`（未填充槽位）→ 阻塞
    - `[ADR-none]` → 豁免规则检查
    - `[ADR-NNN]` → ADR 文件存在 + 状态合法
-4. **plan stage 检查**（[ADR-NNN] 时）：
-   - 如果有 active change → stage 必须 ≥ `implement-ready`
-   - 无 active change → 放行（变更已关闭后的追加提交）
-5. **Spec 完整性检查**（[ADR-NNN] 时）：
+5. **plan stage 检查**（[ADR-NNN] 时）：
+   - 按 adr_id 路由查 stage（active 匹配 → 用 active.stage；不匹配 → fallback 到 `plans/ADR-{adr_id}-plan-*.md` 取编号最大）
+   - stage 必须 ≥ `implement-ready`
+   - ADR 无 plan 文件 → 放行（变更已关闭后的追加提交）
+6. **Spec 完整性检查**（[ADR-NNN] 时）：
    - ADR 关联的 Spec dev-doc 未填写 或 形式化文件仍为骨架 → 阻塞
    - 无关联 Spec → 放行
-6. 全部通过 → 放行
+7. 全部通过 → 放行
 
-校验失败时，hook 阻塞 `git commit`，输出阻塞原因，AI 修改代码后重新 `git add` + `git commit` 形成自然循环。
+校验失败时，hook 阻塞 `git commit`，输出阻塞原因 + 可执行指引 + SKILL.md 引用，AI 修改代码后重新 `git add` + `git commit` 形成自然循环。
 
 #### 6c. PostToolUse hook（subagent 调用追踪）
 
@@ -221,13 +223,15 @@ Claude Code 每次 Agent 工具调用后触发，自动记录调用：
 AI 的 Bash 工具无法干预 PostToolUse hook——它在 Claude Code harness 层执行。
 日志格式：`ISO时间戳 | Agent | description`
 
+**ADR-013 收紧**：`description` 为空或纯空白时不写日志（避免上游 API 失败 / 仪式性调用污染日志）。配合 commit-msg hook 的时间戳新鲜度检查，确保审计是真实发生在本次 commit-msg 写入之后的有效 Agent 调用。
+
 #### 6d. 失败恢复
 
 `git commit` 被 hook 阻塞后，根据错误提示修改（补齐 subagent 审计、推进 plan stage、完成 Spec），然后重新 `git add` + `git commit`。
 
 #### 6e. `SPEC_VC_BYPASS` 保留
 
-bypass 在 spec-vc 损坏时作为逃生口：设置 `SPEC_VC_BYPASS=<原因>` 后 `git commit` 跳过 subagent session + plan stage + Spec 完整性检查。ADR 引用校验照常。bypass 触发写入 `.git/spec-vc-bypass.log`。
+bypass 在 spec-vc 损坏时作为逃生口：设置 `SPEC_VC_BYPASS=<原因>` 后 `git commit` 跳过 subagent session 检查、session log 时间戳新鲜度检查、plan stage 检查、Spec 完整性检查。ADR 引用校验照常。bypass 触发写入 `.git/spec-vc-bypass.log`。
 
 ## 只读/轻量路径
 

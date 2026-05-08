@@ -1,0 +1,44 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "session-log-freshness-contract",
+  "type": "object",
+  "required": ["commit_msg_mtime", "log_last_line_ts", "decision"],
+  "properties": {
+    "commit_msg_mtime": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": ".git/spec-vc-commit-msg 文件的 mtime；不存在时为 null（freshness 检查跳过）"
+    },
+    "log_last_line_ts": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": ".git/spec-vc-subagent-sessions.log 末行时间戳；解析失败时为 null"
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["pass", "block", "skip"],
+      "description": "pass=末行 > mtime；block=末行 ≤ mtime；skip=commit-msg 不存在"
+    }
+  },
+  "examples": [
+    {
+      "commit_msg_mtime": "2026-05-08T13:00:00+08:00",
+      "log_last_line_ts": "2026-05-08T13:05:00+08:00",
+      "decision": "pass"
+    },
+    {
+      "commit_msg_mtime": "2026-05-08T13:00:00+08:00",
+      "log_last_line_ts": "2026-05-08T11:30:00+08:00",
+      "decision": "block"
+    },
+    {
+      "commit_msg_mtime": null,
+      "log_last_line_ts": "2026-05-08T11:30:00+08:00",
+      "decision": "skip"
+    }
+  ]
+}
+```
+
+---

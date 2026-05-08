@@ -1,0 +1,44 @@
+```yaml
+openapi: "3.0.3"
+info:
+  title: spec-vc hook validation chain v2
+  version: "0.1.0"
+  description: |
+    commit-msg hook 与 PostToolUse hook 校验链的语义补完。
+    不对外暴露 HTTP 接口，以函数返回值/副作用/退出码表达。
+paths:
+  /internal/load-stage-for-adr:
+    post:
+      summary: 按 adr_id 路由读取变更 stage
+      description: |
+        替代旧的 _load_active_stage（参数 adr_id 被忽略）。
+        active 匹配 adr_id → 用 active.stage；
+        active 不匹配 → 从 plans/ADR-{adr_id}-plan-*.md 取编号最大读 Stage 字段；
+        ADR 无 plan 文件 → 返回 None（流程已结束，不阻塞）。
+      responses:
+        "200":
+          description: 返回 stage 字符串或 None
+  /internal/check-session-log-freshness:
+    post:
+      summary: 检查 session log 末行时间戳是否晚于 commit-msg 写入时间
+      description: |
+        commit-msg hook 在 check_subagent_session 通过后调用。
+        要求 session log 末行时间戳 > .git/spec-vc-commit-msg mtime。
+        commit-msg 文件不存在（用户未走 prepare）则跳过该检查（保留旁路）。
+      responses:
+        "200":
+          description: 新鲜或文件不存在（跳过），放行
+        "422":
+          description: 末行时间戳早于 commit-msg mtime，阻塞
+  /internal/post-tool-use-hook:
+    post:
+      summary: 跳过空 description 写入
+      description: |
+        当 CLAUDE_TOOL_DESCRIPTION 为空（典型场景：Agent 调用失败、上游 API 错误）
+        时，不向 session log 追加行，避免空行污染 + 防仪式性。
+      responses:
+        "200":
+          description: 写入成功或被跳过
+```
+
+---

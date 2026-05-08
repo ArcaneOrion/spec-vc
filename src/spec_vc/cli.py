@@ -440,7 +440,7 @@ def cmd_commit_prepare(args: argparse.Namespace) -> int:
     if getattr(args, 'message', None):
         print("[spec-vc] commit message 已写入 .git/spec-vc-commit-msg", file=sys.stderr)
     print("[spec-vc] 请完成 subagent 审计后直接 git commit。commit-msg hook 会自动校验：", file=sys.stderr)
-    print("  1. subagent session log 非空（PostToolUse hook 自动记录 Agent 工具调用）", file=sys.stderr)
+    print("  1. subagent session log 非空且时间戳新鲜（PostToolUse hook 自动记录 Agent 工具调用，要求审计在 commit-msg 写入之后）", file=sys.stderr)
     print("  2. ADR 引用合法（[ADR-NNN] 或符合豁免规则的 [ADR-none]）", file=sys.stderr)
     print("  3. [ADR-NNN 时] plan stage ≥ implement-ready", file=sys.stderr)
     print("  4. [ADR-NNN 时] Spec 完整（dev-doc 已填写、形式化文件非骨架）", file=sys.stderr)

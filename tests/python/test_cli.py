@@ -458,3 +458,175 @@ def test_post_tool_use_hook_skips_empty_tool_name(tmp_path: Path):
     assert proc.returncode == 0
     log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
     assert not log_path.exists(), "无 tool_name 时不应创建日志"
+
+
+def test_post_tool_use_hook_skips_empty_description(tmp_path: Path):
+    """ADR-013: description 为空时不写日志（避免空行污染 + 防仪式性）。"""
+    repo = init_repo(tmp_path)
+    proc = run(repo, "hook", "post-tool-use",
+               "--tool-name", "Agent",
+               "--description", "")
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert not log_path.exists(), "空 description 时不应创建日志"
+
+
+def test_post_tool_use_hook_skips_whitespace_description(tmp_path: Path):
+    """ADR-013: description 仅空白时也不写日志。"""
+    repo = init_repo(tmp_path)
+    proc = run(repo, "hook", "post-tool-use",
+               "--tool-name", "Agent",
+               "--description", "   ")
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert not log_path.exists(), "纯空白 description 时不应创建日志"
+
+
+def _write_session_log_with_ts(repo: Path, ts: str, description: str = "audit") -> Path:
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    log_path.write_text(f"{ts} | Agent | {description}\n")
+    return log_path
+
+
+def _touch_commit_msg(repo: Path, content: str = "feat: x [ADR-none]\n") -> Path:
+    msg_path = repo / ".git" / "spec-vc-commit-msg"
+    msg_path.write_text(content)
+    return msg_path
+
+
+def test_freshness_passes_when_log_newer_than_commit_msg(tmp_path: Path):
+    """ADR-013: session log 末行时间戳 > commit-msg mtime → 放行。"""
+    import datetime
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _touch_commit_msg(repo)
+    # 用未来时间确保 > commit-msg mtime
+    future = (datetime.datetime.now().astimezone() + datetime.timedelta(seconds=120)).isoformat(timespec="seconds")
+    _write_session_log_with_ts(repo, future, "fresh audit")
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode == 0, f"新鲜审计应放行, stderr={proc.stderr}"
+
+
+def test_freshness_blocks_when_log_older_than_commit_msg(tmp_path: Path):
+    """ADR-013: session log 末行早于 commit-msg mtime → 阻塞，含 SKILL.md 引用。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    # 先写 stale log，再 touch commit-msg → commit-msg mtime > log 末行
+    _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", "stale audit")
+    _touch_commit_msg(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0, "陈旧审计应阻塞"
+    assert "审计" in proc.stderr or "freshness" in proc.stderr.lower() or "新" in proc.stderr
+    assert "SKILL.md" in proc.stderr
+
+
+def test_freshness_skips_when_no_commit_msg(tmp_path: Path):
+    """ADR-013: 用户未走 prepare 直接 commit（无 commit-msg 文件）→ 跳过 freshness 检查。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    # 写陈旧 log 但不 touch commit-msg
+    _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", "stale audit")
+    assert not (repo / ".git" / "spec-vc-commit-msg").exists()
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode == 0, f"无 commit-msg 时应跳过 freshness, stderr={proc.stderr}"
+
+
+def test_bypass_skips_freshness_check(tmp_path: Path):
+    """ADR-013: SPEC_VC_BYPASS 同时旁路 session 检查与 freshness 检查。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", "stale audit")
+    _touch_commit_msg(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: bypass [ADR-none]\n")
+    proc = _run_with_env(
+        repo, "hook", "commit-msg", str(msg),
+        extra_env={"SPEC_VC_BYPASS": "emergency"},
+    )
+    assert proc.returncode == 0, f"bypass 应同时旁路 freshness, stderr={proc.stderr}"
+
+
+def test_load_stage_for_adr_uses_active_when_match(tmp_path: Path):
+    """ADR-013: active.adr_id 与传入 adr_id 匹配时用 active.stage。"""
+    import sys
+    repo = init_repo(tmp_path)
+    run(repo, "change", "start", "--adr", "000", "--summary", "测试")
+    # active stage 是 clarify
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    try:
+        from spec_vc.hooks import _load_stage_for_adr
+    finally:
+        sys.path.pop(0)
+    adr_dir = repo / "doc" / "arch"
+    assert _load_stage_for_adr(adr_dir, "000") == "clarify"
+
+
+def test_load_stage_for_adr_falls_back_to_plan(tmp_path: Path):
+    """ADR-013: active.adr_id 与传入 adr_id 不匹配时回退到 plan 文件。"""
+    import sys
+    repo = init_repo(tmp_path)
+    run(repo, "adr", "new", "另一决策")  # 创建 ADR-001
+    # active 是 ADR-000
+    run(repo, "change", "start", "--adr", "000", "--summary", "ADR-000 active")
+    # 手动写一份 ADR-001 的 plan 文件，stage=close
+    plan_path = repo / "doc" / "arch" / "plans" / "ADR-001-plan-001.md"
+    plan_path.write_text(
+        "# ADR-001 执行方案 001\n\n"
+        "- **ADR**: ADR-001\n"
+        "- **Stage**: close\n"
+        "- **Status**: archived\n"
+    )
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    try:
+        from spec_vc.hooks import _load_stage_for_adr
+    finally:
+        sys.path.pop(0)
+    adr_dir = repo / "doc" / "arch"
+    # 查 ADR-001 应该 fallback 到 plan，而不是用 active 的 ADR-000 stage
+    assert _load_stage_for_adr(adr_dir, "001") == "close"
+
+
+def test_load_stage_for_adr_returns_none_when_no_plan(tmp_path: Path):
+    """ADR-013: ADR 无 plan 文件 → 返回 None（流程已结束，不阻塞）。"""
+    import sys
+    repo = init_repo(tmp_path)
+    run(repo, "change", "start", "--adr", "000", "--summary", "ADR-000 active")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    try:
+        from spec_vc.hooks import _load_stage_for_adr
+    finally:
+        sys.path.pop(0)
+    adr_dir = repo / "doc" / "arch"
+    assert _load_stage_for_adr(adr_dir, "099") is None
+
+
+def test_load_stage_for_adr_picks_largest_plan_id(tmp_path: Path):
+    """ADR-013: 多个 plan 时取编号最大的 stage。"""
+    import sys
+    repo = init_repo(tmp_path)
+    run(repo, "adr", "new", "另一决策")
+    run(repo, "change", "start", "--adr", "000", "--summary", "ADR-000 active")
+    plans_dir = repo / "doc" / "arch" / "plans"
+    (plans_dir / "ADR-001-plan-001.md").write_text(
+        "# ADR-001 执行方案 001\n\n- **ADR**: ADR-001\n- **Stage**: close\n"
+    )
+    (plans_dir / "ADR-001-plan-002.md").write_text(
+        "# ADR-001 执行方案 002\n\n- **ADR**: ADR-001\n- **Stage**: plan\n"
+    )
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    try:
+        from spec_vc.hooks import _load_stage_for_adr
+    finally:
+        sys.path.pop(0)
+    adr_dir = repo / "doc" / "arch"
+    assert _load_stage_for_adr(adr_dir, "001") == "plan"

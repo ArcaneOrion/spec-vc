@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,49 @@ def check_subagent_session(repo_root: Path) -> None:
             "如未配置 hook，运行 spec-vc init 自动注入 .claude/settings.json。\n"
             "紧急情况下可临时绕过（会写审计日志至 .git/spec-vc-bypass.log）：\n"
             "  SPEC_VC_BYPASS=<原因> git commit ...\n"
+            "详细流程请查看 SKILL.md"
+        )
+
+
+def check_session_log_freshness(repo_root: Path) -> None:
+    """检查 session log 末行时间戳晚于 commit-msg 写入时间。
+
+    旁路条件：commit-msg 文件不存在（用户未走 prepare）→ 跳过。
+    Fail-open：log 末行无法解析时间戳时跳过（避免误伤）。
+    阻塞条件：末行时间戳 ≤ commit-msg mtime → 抛 FileNotFoundError（陈旧审计）。
+    """
+    git_dir = repo_root / ".git"
+    msg_path = git_dir / COMMIT_MSG_FILENAME
+    if not msg_path.exists():
+        return
+
+    log_path = git_dir / SUBAGENT_SESSIONS_FILENAME
+    if not log_path.exists():
+        return  # check_subagent_session 已处理
+
+    lines = [line for line in log_path.read_text().splitlines() if line.strip()]
+    if not lines:
+        return
+
+    last_line = lines[-1]
+    ts_str = last_line.split(" | ", 1)[0].strip()
+    try:
+        log_ts = datetime.datetime.fromisoformat(ts_str)
+    except ValueError:
+        return  # fail-open
+
+    msg_mtime = datetime.datetime.fromtimestamp(msg_path.stat().st_mtime).astimezone()
+    if log_ts.tzinfo is None:
+        log_ts = log_ts.astimezone()
+
+    if log_ts <= msg_mtime:
+        raise FileNotFoundError(
+            f"subagent 审计陈旧：session log 末行时间戳 "
+            f"({log_ts.isoformat(timespec='seconds')}) "
+            f"早于 commit-msg 写入时间 ({msg_mtime.isoformat(timespec='seconds')})。\n"
+            "本次提交未触发新的 Agent 工具调用，审计可能是历史遗留。\n"
+            "下一步：使用 Agent 工具执行新的代码/规格审计，PostToolUse hook 会自动记录。\n"
+            "紧急情况下可临时绕过：SPEC_VC_BYPASS=<原因> git commit ...\n"
             "详细流程请查看 SKILL.md"
         )
 

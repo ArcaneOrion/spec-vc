@@ -36,6 +36,7 @@
 | ADR-010 | 简化提交流程：移除机械 manifest/audit-report/test-report/verify 层，保留 PostToolUse hook 证据链 | Proposed | 2026-05-03 |
 | ADR-011 | 移除 commit submit 阶段，简化为 prepare + hook 校验循环 | Accepted | 2026-05-08 |
 | ADR-012 | 门禁消息增强：失败时返回可执行指引而非仅阻塞 | Proposed | 2026-05-08 |
+| ADR-013 | hook 校验链补完：adr_id 路由与 session log 时间戳新鲜度 | Proposed | 2026-05-08 |
 
 ## 状态图例
 
