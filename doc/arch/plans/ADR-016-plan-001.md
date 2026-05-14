@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-016
 - **ADR Title**: PostToolUse hook 从 stdin 读 JSON 修复 description 取值
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-14T20:45:33
 - **Summary**: 修复 PostToolUse hook description 取值：CLI 从 stdin 读 JSON 而非环境变量
 
@@ -72,12 +72,14 @@ run_post_tool_use 升级为 stdin JSON 优先 + CLI 参数 fallback：tool_name/
 
 ## Closure Summary
 
-待补充
+PostToolUse hook 从 stdin JSON 读取 tool_name 与 tool_input.description（CLI 参数 fallback 优先），修复 ${CLAUDE_TOOL_DESCRIPTION} 环境变量插值导致 description 永远为空的契约错误。_init_claude_hook 简化命令模板（去掉 --tool-name/--description）并对旧格式自动迁移。Spec-016 形式化 stdin JSON 输入契约，6 条 Gherkin Rule 覆盖 stdin 优先 / CLI 优先 / 空跳过 / fail-open 等场景。98 测试全过；手工 stdin JSON 模拟 + 真实 Claude Code harness 触发双重集成验证通过。Audit subagent 总体 PASS。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-016-plan-001.md
+
 
 ## Checkpoints
 
