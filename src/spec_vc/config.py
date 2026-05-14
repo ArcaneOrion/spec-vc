@@ -5,6 +5,8 @@ from pathlib import Path
 import os
 import tomllib
 
+from .errors import ValidationError
+
 
 @dataclass(slots=True)
 class ExemptionConfig:
@@ -44,6 +46,16 @@ class Config:
     spec: SpecConfig = field(default_factory=SpecConfig)
 
 
+def _get_val(section: str, key: str, data: dict, default: object, expected_type: type) -> object:
+    value = data.get(key, default)
+    if not isinstance(value, expected_type):
+        raise ValidationError(
+            f".spec-vc.toml [{section}] {key} 类型错误: "
+            f"期望 {expected_type.__name__}，实际 {type(value).__name__} (值: {value!r})"
+        )
+    return value
+
+
 def load_config(repo_root: Path) -> Config:
     config = Config()
     path = repo_root / ".spec-vc.toml"
@@ -53,20 +65,20 @@ def load_config(repo_root: Path) -> Config:
         exemption = data.get("exemption", {})
         adr_required = data.get("adr_required", {})
         spec = data.get("spec", {})
-        config.project.adr_dir = str(project.get("adr_dir", config.project.adr_dir))
-        config.project.strict = bool(project.get("strict", config.project.strict))
-        config.exemption.enabled = bool(exemption.get("enabled", config.exemption.enabled))
-        config.exemption.allowed_paths = list(exemption.get("allowed_paths", config.exemption.allowed_paths))
-        config.exemption.blocked_paths = list(exemption.get("blocked_paths", config.exemption.blocked_paths))
-        config.exemption.allowed_extensions = list(exemption.get("allowed_extensions", config.exemption.allowed_extensions))
-        config.exemption.max_changed_lines = int(exemption.get("max_changed_lines", config.exemption.max_changed_lines))
-        config.exemption.doc_max_changed_lines = int(exemption.get("doc_max_changed_lines", config.exemption.doc_max_changed_lines))
-        config.adr_required.code_paths = list(adr_required.get("code_paths", config.adr_required.code_paths))
-        config.adr_required.doc_only_paths = list(adr_required.get("doc_only_paths", config.adr_required.doc_only_paths))
-        config.adr_required.doc_only_extensions = list(adr_required.get("doc_only_extensions", config.adr_required.doc_only_extensions))
-        config.adr_required.keywords = list(adr_required.get("keywords", config.adr_required.keywords))
-        config.adr_required.default_conservative = bool(adr_required.get("default_conservative", config.adr_required.default_conservative))
-        config.spec.dir = str(spec.get("dir", config.spec.dir))
+        config.project.adr_dir = str(_get_val("project", "adr_dir", project, config.project.adr_dir, str))
+        config.project.strict = _get_val("project", "strict", project, config.project.strict, bool)
+        config.exemption.enabled = _get_val("exemption", "enabled", exemption, config.exemption.enabled, bool)
+        config.exemption.allowed_paths = _get_val("exemption", "allowed_paths", exemption, config.exemption.allowed_paths, list)
+        config.exemption.blocked_paths = _get_val("exemption", "blocked_paths", exemption, config.exemption.blocked_paths, list)
+        config.exemption.allowed_extensions = _get_val("exemption", "allowed_extensions", exemption, config.exemption.allowed_extensions, list)
+        config.exemption.max_changed_lines = _get_val("exemption", "max_changed_lines", exemption, config.exemption.max_changed_lines, int)
+        config.exemption.doc_max_changed_lines = _get_val("exemption", "doc_max_changed_lines", exemption, config.exemption.doc_max_changed_lines, int)
+        config.adr_required.code_paths = _get_val("adr_required", "code_paths", adr_required, config.adr_required.code_paths, list)
+        config.adr_required.doc_only_paths = _get_val("adr_required", "doc_only_paths", adr_required, config.adr_required.doc_only_paths, list)
+        config.adr_required.doc_only_extensions = _get_val("adr_required", "doc_only_extensions", adr_required, config.adr_required.doc_only_extensions, list)
+        config.adr_required.keywords = _get_val("adr_required", "keywords", adr_required, config.adr_required.keywords, list)
+        config.adr_required.default_conservative = _get_val("adr_required", "default_conservative", adr_required, config.adr_required.default_conservative, bool)
+        config.spec.dir = str(_get_val("spec", "dir", spec, config.spec.dir, str))
     env_adr_dir = os.getenv("ADR_DIR")
     if env_adr_dir:
         config.project.adr_dir = env_adr_dir

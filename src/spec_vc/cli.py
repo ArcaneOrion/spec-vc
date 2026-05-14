@@ -59,7 +59,10 @@ def _write_if_missing(path: Path, content: str) -> None:
 
 def _install_hook(repo_root: Path, name: str) -> Path:
     hook_path = repo_root / ".git" / "hooks" / name
-    hook_path.write_text((skill_root() / "hooks" / name).read_text())
+    template = (skill_root() / "hooks" / name).read_text()
+    spec_vc_bin = str((skill_root() / ".venv" / "bin" / "spec-vc").resolve())
+    content = template.replace("{{SPEC_VC_BIN}}", spec_vc_bin)
+    hook_path.write_text(content)
     hook_path.chmod(0o755)
     return hook_path
 
@@ -82,12 +85,13 @@ def _init_claude_hook(repo_root: Path) -> Path | None:
     """写入/合并 PostToolUse hook 到目标项目的 .claude/settings.json。"""
     claude_dir = repo_root / ".claude"
     settings_path = claude_dir / "settings.json"
+    spec_vc_bin = str((skill_root() / ".venv" / "bin" / "spec-vc").resolve())
 
     hook_entry = {
         "matcher": "Agent",
         "hooks": [{
             "type": "command",
-            "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use --tool-name Agent --description \"${CLAUDE_TOOL_DESCRIPTION}\""
+            "command": f"{spec_vc_bin} hook post-tool-use --tool-name Agent --description \"${{CLAUDE_TOOL_DESCRIPTION}}\""
         }]
     }
 

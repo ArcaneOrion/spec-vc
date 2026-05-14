@@ -6,7 +6,7 @@ from datetime import datetime
 import fnmatch
 import re
 
-from ._sections import extract_section as _read_section, replace_section as _replace_section
+from ._sections import replace_section as _replace_section
 from .adr import list_adrs, parse_adr
 from .config import AdrRequiredConfig
 from .errors import UsageError, ValidationError
@@ -14,6 +14,7 @@ from .errors import UsageError, ValidationError
 ACTIVE_FILE_NAME = "_active.md"
 PLAN_DIR_NAME = "plans"
 ACTIVE_STAGE_VALUES = {"discover", "clarify", "plan", "implement-ready", "validate", "close"}
+_PLAN_ID_RE = re.compile(r"ADR-\d{3,}-plan-\d{3}$")
 FIELD_LABELS = {
     "motivation": "动机与上下文",
     "boundary": "目标与边界",
@@ -145,7 +146,11 @@ def next_plan_id(adr_dir: Path, adr_id: str) -> str:
 
 
 def plan_path(adr_dir: Path, active: ActiveChange) -> Path:
-    return adr_dir.parent.parent / active.plan_path
+    repo_root = adr_dir.parent.parent
+    resolved = (repo_root / active.plan_path).resolve()
+    if not str(resolved).startswith(str(repo_root.resolve()) + "/"):
+        raise ValidationError(f"plan_path 指向仓库外: {active.plan_path}")
+    return resolved
 
 
 def _replace_meta(text: str, key: str, value: str) -> str:
@@ -257,10 +262,6 @@ def create_plan(adr_dir: Path, adr_id: str, summary: str) -> Path:
             "",
             "- **Commits**: 待补充",
             "- **Plan**: 待补充",
-            "",
-            "## Risks and Rollback",
-            "",
-            "待补充",
             "",
             "## Checkpoints",
             "",
@@ -471,7 +472,8 @@ def read_plan_content(adr_dir: Path, plan_id: str | None = None) -> str:
             raise UsageError("当前没有 active change")
         path = plan_path(adr_dir, active)
     else:
-        # plan_id 格式: ADR-NNN-plan-NNN
+        if not _PLAN_ID_RE.match(plan_id):
+            raise ValidationError(f"无效的 plan ID: {plan_id!r}")
         path = plans_dir(adr_dir) / f"{plan_id}.md"
     if not path.exists():
         raise UsageError(f"计划文件不存在: {path}")
