@@ -187,15 +187,6 @@ def run_commit_msg(message_file: Path) -> int:
     bypass_reason = os.environ.get("SPEC_VC_BYPASS", "")
     if bypass_reason:
         _try_write_bypass_log(repo_root, bypass_reason, subject)
-    else:
-        try:
-            check_subagent_session(repo_root)
-        except FileNotFoundError as e:
-            raise ValidationError(str(e)) from e
-        try:
-            check_session_log_freshness(repo_root)
-        except FileNotFoundError as e:
-            raise ValidationError(str(e)) from e
 
     if any(token.startswith("ADR-?") for token in tokens):
         raise ValidationError(HELP_SLOT)
@@ -221,7 +212,16 @@ def run_commit_msg(message_file: Path) -> int:
     adr = parse_adr(adr_file)
     ensure_referenceable(adr, adr_id)
 
-    # [ADR-NNN] 额外检查: plan stage ≥ implement-ready + Spec 完整性
+    # [ADR-NNN] 额外检查: session 审计 + plan stage + Spec 完整性
+    if not bypass_reason:
+        try:
+            check_subagent_session(repo_root)
+        except FileNotFoundError as e:
+            raise ValidationError(str(e)) from e
+        try:
+            check_session_log_freshness(repo_root)
+        except FileNotFoundError as e:
+            raise ValidationError(str(e)) from e
     _check_plan_stage(repo_root, config, adr_id)
     _check_spec_readiness_for_adr(repo_root, config, adr_id)
 

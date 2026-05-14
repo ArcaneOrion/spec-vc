@@ -38,6 +38,7 @@
 | ADR-012 | 门禁消息增强：失败时返回可执行指引而非仅阻塞 | Proposed | 2026-05-08 |
 | ADR-013 | hook 校验链补完：adr_id 路由与 session log 时间戳新鲜度 | Proposed | 2026-05-08 |
 | ADR-014 | 修复审计发现的6个致命缺陷 | Proposed | 2026-05-14 |
+| ADR-015 | 修复 [ADR-none] 路径被 subagent session 检查误伤 | Proposed | 2026-05-14 |
 
 ## 状态图例
 

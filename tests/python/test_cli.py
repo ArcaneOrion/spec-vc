@@ -182,12 +182,12 @@ def _write_subagent_session(repo: Path):
 
 
 def test_commit_msg_blocks_without_subagent_session(tmp_path: Path):
-    """无 subagent session 记录时 hook 阻塞。"""
+    """无 subagent session 记录时 [ADR-NNN] hook 阻塞。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-none]\n")
+    msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0
     assert "未找到 subagent 审计记录" in proc.stderr
@@ -258,12 +258,12 @@ def test_commit_msg_bypass_env_skips_token_check(tmp_path: Path):
 
 
 def test_commit_msg_bypass_empty_string_falls_back_to_session_check(tmp_path: Path):
-    """ADR-011: SPEC_VC_BYPASS 空字符串视为未触发，走 subagent session 校验。"""
+    """ADR-011: SPEC_VC_BYPASS 空字符串视为未触发，[ADR-NNN] 走 subagent session 校验。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-none]\n")
+    msg.write_text("docs: update [ADR-000]\n")
     proc = _run_with_env(
         repo, "hook", "commit-msg", str(msg),
         extra_env={"SPEC_VC_BYPASS": ""},
@@ -292,25 +292,25 @@ def test_commit_msg_bypass_log_failure_is_fail_open(tmp_path: Path):
 
 
 def test_hook_with_subagent_session_passes(tmp_path: Path):
-    """有 subagent session 记录时 hook 放行。"""
+    """有 subagent session 记录时 [ADR-NNN] hook 放行。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     _write_subagent_session(repo)
     msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-none]\n")
+    msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode == 0, f"有 session 记录应放行, stderr={proc.stderr}"
 
 
 def test_hook_blocks_without_subagent_session(tmp_path: Path):
-    """无 subagent session 记录时 hook 阻塞。"""
+    """无 subagent session 记录时 [ADR-NNN] hook 阻塞。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     # 不写 subagent session log
     msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-none]\n")
+    msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0, "无 session 记录应阻塞"
     assert "subagent" in proc.stderr
@@ -495,7 +495,7 @@ def _touch_commit_msg(repo: Path, content: str = "feat: x [ADR-none]\n") -> Path
 
 
 def test_freshness_passes_when_log_newer_than_commit_msg(tmp_path: Path):
-    """ADR-013: session log 末行时间戳 > commit-msg mtime → 放行。"""
+    """ADR-013: session log 末行时间戳 > commit-msg mtime → [ADR-NNN] 放行。"""
     import datetime
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
@@ -505,13 +505,13 @@ def test_freshness_passes_when_log_newer_than_commit_msg(tmp_path: Path):
     future = (datetime.datetime.now().astimezone() + datetime.timedelta(seconds=120)).isoformat(timespec="seconds")
     _write_session_log_with_ts(repo, future, "fresh audit")
     msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-none]\n")
+    msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode == 0, f"新鲜审计应放行, stderr={proc.stderr}"
 
 
 def test_freshness_blocks_when_log_older_than_commit_msg(tmp_path: Path):
-    """ADR-013: session log 末行早于 commit-msg mtime → 阻塞，含 SKILL.md 引用。"""
+    """ADR-013: session log 末行早于 commit-msg mtime → [ADR-NNN] 阻塞，含 SKILL.md 引用。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
@@ -519,7 +519,7 @@ def test_freshness_blocks_when_log_older_than_commit_msg(tmp_path: Path):
     _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", "stale audit")
     _touch_commit_msg(repo)
     msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-none]\n")
+    msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0, "陈旧审计应阻塞"
     assert "审计" in proc.stderr or "freshness" in proc.stderr.lower() or "新" in proc.stderr
@@ -527,7 +527,7 @@ def test_freshness_blocks_when_log_older_than_commit_msg(tmp_path: Path):
 
 
 def test_freshness_skips_when_no_commit_msg(tmp_path: Path):
-    """ADR-013: 用户未走 prepare 直接 commit（无 commit-msg 文件）→ 跳过 freshness 检查。"""
+    """ADR-013: 用户未走 prepare 直接 commit（无 commit-msg 文件）→ [ADR-NNN] 跳过 freshness 检查。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
@@ -535,7 +535,7 @@ def test_freshness_skips_when_no_commit_msg(tmp_path: Path):
     _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", "stale audit")
     assert not (repo / ".git" / "spec-vc-commit-msg").exists()
     msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-none]\n")
+    msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode == 0, f"无 commit-msg 时应跳过 freshness, stderr={proc.stderr}"
 
@@ -554,6 +554,20 @@ def test_bypass_skips_freshness_check(tmp_path: Path):
         extra_env={"SPEC_VC_BYPASS": "emergency"},
     )
     assert proc.returncode == 0, f"bypass 应同时旁路 freshness, stderr={proc.stderr}"
+
+
+def test_adr_none_skips_session_freshness_check(tmp_path: Path):
+    """ADR-015: [ADR-none] 不检查 subagent session 和时间戳新鲜度，仅走豁免规则。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc change\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    # 写陈旧 log → 如果是 [ADR-NNN] 会被阻塞，但 [ADR-none] 应跳过
+    _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", "stale audit")
+    _touch_commit_msg(repo)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-none]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode == 0, f"[ADR-none] 应跳过 session 检查, stderr={proc.stderr}"
 
 
 def test_load_stage_for_adr_uses_active_when_match(tmp_path: Path):
