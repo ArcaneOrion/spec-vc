@@ -6,7 +6,7 @@ import json
 import os
 
 
-def run(repo: Path, *args: str, check: bool = False):
+def run(repo: Path, *args: str, check: bool = False, stdin: str | None = None):
     root = Path(__file__).resolve().parents[2]
     env = {**os.environ, "PYTHONPATH": str(root / "src")}
     proc = subprocess.run(
@@ -15,6 +15,7 @@ def run(repo: Path, *args: str, check: bool = False):
         text=True,
         capture_output=True,
         env=env,
+        input=stdin,
     )
     if check and proc.returncode != 0:
         raise AssertionError(proc.stderr or proc.stdout)
@@ -480,6 +481,119 @@ def test_post_tool_use_hook_skips_whitespace_description(tmp_path: Path):
     assert proc.returncode == 0
     log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
     assert not log_path.exists(), "纯空白 description 时不应创建日志"
+
+
+def test_post_tool_use_hook_reads_stdin_json(tmp_path: Path):
+    """ADR-016: 无 CLI 参数时从 stdin JSON 提取 tool_name 与 tool_input.description。"""
+    repo = init_repo(tmp_path)
+    payload = json.dumps({
+        "tool_name": "Agent",
+        "tool_input": {"description": "stdin-driven audit", "prompt": "x", "subagent_type": "y"},
+    })
+    proc = run(repo, "hook", "post-tool-use", stdin=payload)
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert log_path.exists()
+    content = log_path.read_text()
+    assert "Agent" in content
+    assert "stdin-driven audit" in content
+
+
+def test_post_tool_use_hook_cli_args_override_stdin(tmp_path: Path):
+    """ADR-016: CLI 参数有值时优先于 stdin JSON。"""
+    repo = init_repo(tmp_path)
+    payload = json.dumps({
+        "tool_name": "Agent",
+        "tool_input": {"description": "from stdin"},
+    })
+    proc = run(repo, "hook", "post-tool-use",
+               "--tool-name", "Agent",
+               "--description", "from cli",
+               stdin=payload)
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    content = log_path.read_text()
+    assert "from cli" in content
+    assert "from stdin" not in content
+
+
+def test_post_tool_use_hook_skips_empty_description_in_stdin(tmp_path: Path):
+    """ADR-016 + ADR-013: stdin JSON 中 description 为空仍跳过写日志。"""
+    repo = init_repo(tmp_path)
+    payload = json.dumps({"tool_name": "Agent", "tool_input": {"description": ""}})
+    proc = run(repo, "hook", "post-tool-use", stdin=payload)
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert not log_path.exists()
+
+
+def test_post_tool_use_hook_skips_when_tool_input_missing(tmp_path: Path):
+    """ADR-016: stdin JSON 缺 tool_input 字段时跳过写日志。"""
+    repo = init_repo(tmp_path)
+    payload = json.dumps({"tool_name": "Agent"})
+    proc = run(repo, "hook", "post-tool-use", stdin=payload)
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert not log_path.exists()
+
+
+def test_post_tool_use_hook_fail_open_on_invalid_json(tmp_path: Path):
+    """ADR-016: stdin 非 JSON 文本时 fail-open（不抛错，不写日志）。"""
+    repo = init_repo(tmp_path)
+    proc = run(repo, "hook", "post-tool-use", stdin="not a json {{{")
+    assert proc.returncode == 0
+    assert proc.stderr == ""
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert not log_path.exists()
+
+
+def test_post_tool_use_hook_skips_when_stdin_empty_and_no_args(tmp_path: Path):
+    """ADR-016: 无 stdin 内容且无 CLI 参数时跳过（典型：终端手工调用）。"""
+    repo = init_repo(tmp_path)
+    proc = run(repo, "hook", "post-tool-use", stdin="")
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert not log_path.exists()
+
+
+def test_init_writes_post_tool_use_hook_without_args(tmp_path: Path):
+    """ADR-016: spec-vc init 写入的 PostToolUse hook 命令不再带 --tool-name/--description。"""
+    repo = init_empty_repo(tmp_path)
+    run(repo, "init", check=True)
+    settings = json.loads((repo / ".claude" / "settings.json").read_text())
+    post_hooks = settings["hooks"]["PostToolUse"]
+    cmds = [h["command"] for entry in post_hooks if entry.get("matcher") == "Agent" for h in entry.get("hooks", [])]
+    assert cmds, "Agent matcher 下应有至少一条 spec-vc hook 命令"
+    for cmd in cmds:
+        assert "--tool-name" not in cmd
+        assert "--description" not in cmd
+        assert "CLAUDE_TOOL_DESCRIPTION" not in cmd
+        assert cmd.endswith("hook post-tool-use")
+
+
+def test_init_migrates_legacy_post_tool_use_hook(tmp_path: Path):
+    """ADR-016: spec-vc init 自动把旧格式（含 --tool-name/--description）升级为新格式。"""
+    repo = init_empty_repo(tmp_path)
+    claude_dir = repo / ".claude"
+    claude_dir.mkdir()
+    legacy = {
+        "hooks": {
+            "PostToolUse": [{
+                "matcher": "Agent",
+                "hooks": [{
+                    "type": "command",
+                    "command": "/old/path/spec-vc hook post-tool-use --tool-name Agent --description \"${CLAUDE_TOOL_DESCRIPTION}\""
+                }]
+            }]
+        }
+    }
+    (claude_dir / "settings.json").write_text(json.dumps(legacy))
+    run(repo, "init", check=True)
+    merged = json.loads((claude_dir / "settings.json").read_text())
+    cmds = [h["command"] for entry in merged["hooks"]["PostToolUse"] for h in entry.get("hooks", [])]
+    assert any(cmd.endswith("hook post-tool-use") and "--description" not in cmd for cmd in cmds)
+    for cmd in cmds:
+        assert "CLAUDE_TOOL_DESCRIPTION" not in cmd
 
 
 def _write_session_log_with_ts(repo: Path, ts: str, description: str = "audit") -> Path:

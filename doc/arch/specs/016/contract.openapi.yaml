@@ -1,0 +1,57 @@
+```yaml
+openapi: "3.0.3"
+info:
+  title: spec-vc PostToolUse hook v2 (stdin JSON contract)
+  version: "0.1.0"
+  description: |
+    修正 Spec-004 中 PostToolUse hook 输入契约的错误（query parameters → stdin JSON）。
+    与 Claude Code harness 实际行为对齐：harness 通过 stdin 传 JSON payload，
+    不导出 tool_input 字段为环境变量。
+    本契约不对外暴露 HTTP，由函数副作用 + 退出码表达。
+paths:
+  /internal/hook/post-tool-use:
+    post:
+      summary: 记录 Agent 工具调用到 .git/spec-vc-subagent-sessions.log
+      description: |
+        参数解析优先级（自上而下）：
+        1. CLI 显式传入的 --tool-name / --description（非空则使用）
+        2. stdin 非 tty 且包含 JSON 时，从 payload 解析 tool_name 与 tool_input.description
+        3. 二者皆无 → 不写日志，return 0（不抛错）
+        ADR-013 规则保留：解析后 description 仍为空（含纯空白）→ 跳过写日志。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostToolUseHookPayload"
+        description: |
+          Claude Code harness 触发时通过 stdin 注入的 JSON payload。
+          手工 CLI 调用时可省略（走 args fallback 或不写日志）。
+      responses:
+        "0":
+          description: |
+            正常退出。可能的副作用：
+            - 写入日志一行 `ISO时间戳 | <tool_name> | <description>\n`
+            - 或跳过写入（参数/payload 缺失 / description 空 / JSON 解析失败）
+components:
+  schemas:
+    PostToolUseHookPayload:
+      type: object
+      description: |
+        Claude Code PostToolUse hook 通过 stdin 传入的 JSON 结构。
+        本 Spec 仅依赖 tool_name 与 tool_input.description 两个字段，
+        其余字段（hook_event_name / tool_response 等）允许存在但不消费。
+      properties:
+        tool_name:
+          type: string
+          description: 被调用的工具名，本 hook 在 settings.json 中以 matcher="Agent" 注册
+        tool_input:
+          type: object
+          properties:
+            description:
+              type: string
+              description: Agent 调用时填入的 description 字段；可能为空或缺失
+      required: []
+```
+
+---

@@ -82,16 +82,22 @@ def _run_uv_sync(project_root: Path) -> None:
 
 
 def _init_claude_hook(repo_root: Path) -> Path | None:
-    """写入/合并 PostToolUse hook 到目标项目的 .claude/settings.json。"""
+    """写入/合并 PostToolUse hook 到目标项目的 .claude/settings.json。
+
+    ADR-016 修正：命令去掉 ``--tool-name`` / ``--description``——Claude Code harness
+    通过 stdin JSON 传 payload，不导出 tool_input 字段为环境变量。
+    发现旧格式（含参数）时自动升级为新格式，让重跑 ``spec-vc init`` 可治愈历史配置。
+    """
     claude_dir = repo_root / ".claude"
     settings_path = claude_dir / "settings.json"
     spec_vc_bin = str((skill_root() / ".venv" / "bin" / "spec-vc").resolve())
+    expected_command = f"{spec_vc_bin} hook post-tool-use"
 
     hook_entry = {
         "matcher": "Agent",
         "hooks": [{
             "type": "command",
-            "command": f"{spec_vc_bin} hook post-tool-use --tool-name Agent --description \"${{CLAUDE_TOOL_DESCRIPTION}}\""
+            "command": expected_command
         }]
     }
 
@@ -104,11 +110,26 @@ def _init_claude_hook(repo_root: Path) -> Path | None:
             )
         existing_hooks = existing.get("hooks", {})
         existing_post = existing_hooks.get("PostToolUse", [])
+        mutated = False
+        already_correct = False
         for entry in existing_post:
-            if entry.get("matcher") == "Agent":
-                for h in entry.get("hooks", []):
-                    if "spec-vc hook post-tool-use" in h.get("command", ""):
-                        return None
+            if entry.get("matcher") != "Agent":
+                continue
+            for h in entry.get("hooks", []):
+                cmd = h.get("command", "")
+                if "spec-vc hook post-tool-use" not in cmd:
+                    continue
+                if cmd == expected_command:
+                    already_correct = True
+                else:
+                    h["command"] = expected_command
+                    mutated = True
+        if already_correct and not mutated:
+            return None
+        if mutated:
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n")
+            return settings_path
         existing.setdefault("hooks", {}).setdefault("PostToolUse", []).append(hook_entry)
         claude_dir.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n")

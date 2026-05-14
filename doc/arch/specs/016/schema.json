@@ -1,0 +1,62 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "post-tool-use-resolution",
+  "type": "object",
+  "required": ["source", "tool_name", "description", "decision"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "enum": ["cli_args", "stdin_json", "none"],
+      "description": "实际取值来源；cli_args 优先，stdin_json 在参数为空且 stdin 非 tty 且 JSON 解析成功时使用；二者皆失败为 none"
+    },
+    "tool_name": {
+      "type": "string",
+      "description": "解析后的工具名；空字符串等价于跳过写日志"
+    },
+    "description": {
+      "type": "string",
+      "description": "解析后的 description；strip() 为空则跳过写日志（ADR-013 规则）"
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["write", "skip_empty_tool_name", "skip_empty_description", "skip_no_input", "skip_parse_error"],
+      "description": "本次调用最终决策；仅 write 会向 session log 追加行；skip_* 全部 return 0 不抛错"
+    }
+  },
+  "examples": [
+    {
+      "source": "stdin_json",
+      "tool_name": "Agent",
+      "description": "ADR-016 code audit",
+      "decision": "write"
+    },
+    {
+      "source": "cli_args",
+      "tool_name": "Agent",
+      "description": "manual probe",
+      "decision": "write"
+    },
+    {
+      "source": "stdin_json",
+      "tool_name": "Agent",
+      "description": "",
+      "decision": "skip_empty_description"
+    },
+    {
+      "source": "none",
+      "tool_name": "",
+      "description": "",
+      "decision": "skip_no_input"
+    },
+    {
+      "source": "none",
+      "tool_name": "",
+      "description": "",
+      "decision": "skip_parse_error"
+    }
+  ]
+}
+```
+
+---

@@ -212,7 +212,7 @@ Claude Code 每次 Agent 工具调用后触发，自动记录调用：
         "matcher": "Agent",
         "hooks": [{
           "type": "command",
-          "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use --tool-name Agent --description \"${CLAUDE_TOOL_DESCRIPTION}\""
+          "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use"
         }]
       }
     ]
@@ -221,9 +221,12 @@ Claude Code 每次 Agent 工具调用后触发，自动记录调用：
 ```
 
 AI 的 Bash 工具无法干预 PostToolUse hook——它在 Claude Code harness 层执行。
+Claude Code harness 触发 hook 时通过 **stdin JSON** 传入 payload（`{"tool_name":"Agent","tool_input":{"description":"..."}}`），spec-vc CLI 从 stdin 自行解析；旧版命令行 `--tool-name`/`--description` 仍可作为手工调用的 fallback 通路。
 日志格式：`ISO时间戳 | Agent | description`
 
 **ADR-013 收紧**：`description` 为空或纯空白时不写日志（避免上游 API 失败 / 仪式性调用污染日志）。配合 commit-msg hook 的时间戳新鲜度检查，确保审计是真实发生在本次 commit-msg 写入之后的有效 Agent 调用。
+
+**ADR-016 修正**：Claude Code harness 通过 stdin JSON 而非环境变量传 hook payload。旧版 `--description "${CLAUDE_TOOL_DESCRIPTION}"` 会展开为空串导致日志静默丢失——`spec-vc init` 重跑会自动迁移旧 settings.json 到新格式。
 
 #### 6d. 失败恢复
 

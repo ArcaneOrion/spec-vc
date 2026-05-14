@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use --tool-name Agent --description \"${CLAUDE_TOOL_DESCRIPTION}\""
+            "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use"
           }
         ]
       }

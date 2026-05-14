@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import sys
 from pathlib import Path
@@ -122,11 +123,36 @@ def _check_spec_readiness_for_adr(repo_root: Path, config: Config, adr_id: str) 
 def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "") -> int:
     """记录 Agent 工具调用到 subagent session log。
 
-    跳过条件（ADR-013）：
-    - tool_name 为空（非 Agent 调用）
-    - description 为空或纯空白（典型场景：Agent 调用失败、上游 API 错误，
-      避免空行污染日志 + 防仪式性绕过）。
+    输入优先级（ADR-016）：
+    1. CLI 显式参数（--tool-name / --description）有值则使用
+    2. CLI 参数为空且 stdin 非 tty 时，从 stdin JSON payload 提取
+       tool_name 与 tool_input.description（Claude Code harness 的实际传值方式）
+    3. JSON 解析失败 / 任何 IO 异常 → fail-open（return 0，不阻塞 commit）
+
+    跳过条件（ADR-013 保留）：
+    - 解析后 tool_name 为空
+    - 解析后 description 为空或纯空白
     """
+    if (not tool_name or not description) and not sys.stdin.isatty():
+        try:
+            raw = sys.stdin.read()
+        except OSError:
+            return 0
+        if raw.strip():
+            try:
+                payload = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                return 0
+            if isinstance(payload, dict):
+                if not tool_name:
+                    candidate = payload.get("tool_name", "")
+                    tool_name = candidate if isinstance(candidate, str) else ""
+                if not description:
+                    tool_input = payload.get("tool_input") or {}
+                    if isinstance(tool_input, dict):
+                        candidate = tool_input.get("description", "")
+                        description = candidate if isinstance(candidate, str) else ""
+
     if not tool_name:
         return 0
     if not description.strip():
