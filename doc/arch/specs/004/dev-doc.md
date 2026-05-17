@@ -1,10 +1,20 @@
 # Spec-004: PostToolUse hook subagent 调用追踪与 commit 门禁
 
 - **ADR**: ADR-009
-- **Status**: Draft
+- **Status**: Superseded (部分区块被后续 ADR 修正)
 - **Author**: arcaneorion
 - **Date**: 2026-05-03
 - **Version**: 0.1.0
+
+---
+
+> ⚠️ **本 Spec 多个区块已被后续变更修正，保留作 ADR-009 时期的设计历史记录**：
+>
+> - **PostToolUse hook 输入契约**（接口契约 `/hook/post-tool-use` 节用 query parameters 描述 `tool_name`/`description`）→ 错误，正确契约为 stdin JSON payload，见 [Spec-016](../016/dev-doc.md) / [ADR-016](../../adr-016.md)
+> - **commit-msg 校验链中的 token + manifest + prepare-ts + TTY-bound submit** → 已被 [ADR-011](../../adr-011.md) 完全移除，简化为 prepare + hook 校验循环
+> - **`/commit/prepare` 与 `/commit/submit` 两阶段端点** → 已被 [ADR-011](../../adr-011.md) 合并为单一 prepare 端点
+>
+> 阅读本 Spec 时请同时查阅上述 ADR / Spec 以了解当前真实状态。
 
 ---
 

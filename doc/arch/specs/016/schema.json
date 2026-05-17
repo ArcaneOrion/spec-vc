@@ -2,8 +2,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "post-tool-use-resolution",
+  "description": "run_post_tool_use 解析输入后得到的内部状态。本 schema 仅描述输入字段；行为决策（写日志 / 跳过）完整规则见行为规则区块的 Gherkin scenario，不在此处冗余建模。",
   "type": "object",
-  "required": ["source", "tool_name", "description", "decision"],
+  "required": ["source", "tool_name", "description"],
   "properties": {
     "source": {
       "type": "string",
@@ -17,43 +18,28 @@
     "description": {
       "type": "string",
       "description": "解析后的 description；strip() 为空则跳过写日志（ADR-013 规则）"
-    },
-    "decision": {
-      "type": "string",
-      "enum": ["write", "skip_empty_tool_name", "skip_empty_description", "skip_no_input", "skip_parse_error"],
-      "description": "本次调用最终决策；仅 write 会向 session log 追加行；skip_* 全部 return 0 不抛错"
     }
   },
   "examples": [
     {
       "source": "stdin_json",
       "tool_name": "Agent",
-      "description": "ADR-016 code audit",
-      "decision": "write"
+      "description": "ADR-016 code audit"
     },
     {
       "source": "cli_args",
       "tool_name": "Agent",
-      "description": "manual probe",
-      "decision": "write"
+      "description": "manual probe"
     },
     {
       "source": "stdin_json",
       "tool_name": "Agent",
-      "description": "",
-      "decision": "skip_empty_description"
+      "description": ""
     },
     {
       "source": "none",
       "tool_name": "",
-      "description": "",
-      "decision": "skip_no_input"
-    },
-    {
-      "source": "none",
-      "tool_name": "",
-      "description": "",
-      "decision": "skip_parse_error"
+      "description": ""
     }
   ]
 }
