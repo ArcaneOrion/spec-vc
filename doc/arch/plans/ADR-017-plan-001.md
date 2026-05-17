@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-017
 - **ADR Title**: commit-msg 审计证据由间接代理升级为内容绑定
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-17T20:36:00
 - **Summary**: 修复 ADR-013/016 暴露的审计信任漏洞 H1（tool_input 代理）+ H2（一次审计跨多 commit 复用）
 
@@ -72,12 +72,14 @@ Spec-017 dev-doc 全填 + 形式化 3 文件就绪；spec check 7/7 全过。bas
 
 ## Closure Summary
 
-待补充
+把 audit 真实发生的代理证据（description 非空）升级为内容绑定（description 含 staged diff 指纹 anchor）。commit prepare 计算 ADR-XXX@<sha12> 并写 .git/spec-vc-audit-anchor；commit-msg hook 新增 check_anchor_binding 要求 session log 末行 description 含 anchor；PostToolUse hook 守卫 PostToolUseFailure 事件。[ADR-none] 与 SPEC_VC_BYPASS 路径保留原有语义。修复 ADR-013/016 暴露的 H1（间接证据脆弱）+ H2（一次 audit 跨多 commit 复用）两漏洞。哲学转向：spec-vc 不防作弊，把通过门禁的最小成本提到至少读一次 staged diff——'作弊比诚实便宜' 曲线翻过来。新增 11 测试覆盖 anchor 行为；7 旧测试通过 helper 升级 + 2 freshness 测试单独适配。109/109 全过。本 commit 自身即端到端集成验证：cc13a84 通过新 hook 校验链全 7 项含 anchor binding。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-017-plan-001.md
+
 
 ## Checkpoints
 
