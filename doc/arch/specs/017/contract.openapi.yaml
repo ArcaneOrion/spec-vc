@@ -1,0 +1,55 @@
+```yaml
+openapi: "3.0.3"
+info:
+  title: spec-vc audit anchor binding (ADR-017)
+  version: "0.1.0"
+  description: |
+    commit prepare 生成 anchor + commit-msg hook 校验 anchor 子串绑定 session log 末行。
+    不对外暴露 HTTP，以函数副作用 + 退出码表达。
+paths:
+  /internal/commit-prepare/anchor:
+    post:
+      summary: 计算并写入 .git/spec-vc-audit-anchor
+      description: |
+        commit prepare 在写 commit-msg 之后调用：
+        1. 从 commit message subject 提取 ADR token（[ADR-NNN] 或 [ADR-none]）
+        2. 计算 staged 内容指纹 sha12 = sha256(git diff --cached --no-renames --no-color)[:12]
+        3. 拼接 anchor = "<adr_token>@<sha12>"（去除括号；如 "ADR-017@a3f7c891b2d4"）
+        4. 写入 .git/spec-vc-audit-anchor（单行，无 trailing newline）
+        5. stdout 输出 "audit-anchor: <anchor>" 提示 AI 复述
+      responses:
+        "0":
+          description: anchor 已写入；调用方 stdout 含 anchor
+  /internal/hook/post-tool-use/with-failure-guard:
+    post:
+      summary: PostToolUse hook + PostToolUseFailure 守卫
+      description: |
+        在 ADR-016 stdin JSON 优先逻辑之前增加：
+        若 payload.hook_event_name == "PostToolUseFailure" → return 0 直接跳过
+        其他事件按 ADR-016 路径处理。
+        注：Claude Code 中 Agent 业务失败通常仍触发 PostToolUse，本守卫仅命中 harness 显式失败场景（如调用被中断）。
+      responses:
+        "0":
+          description: 已跳过或已写日志
+  /internal/commit-msg/anchor-binding:
+    post:
+      summary: 校验 session log 末行 description 含 anchor 子串
+      description: |
+        commit-msg hook 在 check_session_log_freshness 通过后调用：
+        - SPEC_VC_BYPASS 非空 → 跳过本检查
+        - [ADR-none] → 跳过（豁免规则已量化卡控）
+        - [ADR-NNN]:
+            - 读 .git/spec-vc-audit-anchor:
+                * 文件不存在 → 阻塞（"未走 commit prepare 生成 anchor"）
+                * 文件存在:
+                    - 读 session log 末行的 description 字段（管道分隔第三段）
+                    - description 含 anchor 子串 → 放行
+                    - 不含 → 阻塞（输出当前 anchor 与可执行指引）
+      responses:
+        "0":
+          description: 放行
+        "1":
+          description: 阻塞（不含 anchor / 缺 anchor 文件）
+```
+
+---

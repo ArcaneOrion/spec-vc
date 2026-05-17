@@ -1,0 +1,40 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "audit-anchor",
+  "description": "spec-vc commit prepare 写入 .git/spec-vc-audit-anchor 的内容契约。单行明文，无 trailing newline，便于直接读取与字符串包含比较。",
+  "type": "object",
+  "required": ["adr_token", "diff_sha12", "anchor_string"],
+  "properties": {
+    "adr_token": {
+      "type": "string",
+      "pattern": "^ADR-(\\d{3,}|none)$",
+      "description": "本次 commit subject 提取的 ADR token，不含方括号"
+    },
+    "diff_sha12": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$",
+      "description": "sha256(git diff --cached --no-renames --no-color) 前 12 个十六进制字符；staged 内容变化时随之变化"
+    },
+    "anchor_string": {
+      "type": "string",
+      "pattern": "^ADR-(\\d{3,}|none)@[0-9a-f]{12}$",
+      "description": "实际写入文件的字符串：'<adr_token>@<diff_sha12>'"
+    }
+  },
+  "examples": [
+    {
+      "adr_token": "ADR-017",
+      "diff_sha12": "a3f7c891b2d4",
+      "anchor_string": "ADR-017@a3f7c891b2d4"
+    },
+    {
+      "adr_token": "ADR-none",
+      "diff_sha12": "0000abcd1234",
+      "anchor_string": "ADR-none@0000abcd1234"
+    }
+  ]
+}
+```
+
+---

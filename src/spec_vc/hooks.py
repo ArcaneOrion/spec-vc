@@ -120,6 +120,54 @@ def _check_spec_readiness_for_adr(repo_root: Path, config: Config, adr_id: str) 
     raise ValidationError("\n".join(lines))
 
 
+def _check_anchor_binding(repo_root: Path, adr_id: str) -> None:
+    """[ADR-NNN] 时校验 session log 末行 description 含 audit anchor 子串（ADR-017）。
+
+    - anchor 文件不存在 → 阻塞（要求走 commit prepare）
+    - anchor 文件存在 + session log 末行不含 anchor 子串 → 阻塞 + 输出当前 anchor
+    - 末行解析失败 → fail-open（与 freshness 一致）
+    """
+    from .commit import SUBAGENT_SESSIONS_FILENAME, read_audit_anchor
+
+    anchor = read_audit_anchor(repo_root)
+    if anchor is None:
+        raise ValidationError(
+            "[spec-vc] Commit 被阻塞: 未找到 .git/spec-vc-audit-anchor (ADR-017)。\n"
+            f"原因：本次 commit 引用 ADR-{adr_id} 但未走 spec-vc commit prepare 生成 anchor，"
+            "audit 与本次 staged 内容无绑定。\n"
+            "下一步：运行 spec-vc commit prepare --message \"<完整 commit message>\" 生成 anchor，\n"
+            "在 audit subagent 的 description 中复述 anchor，再 git commit。\n"
+            "紧急情况下可临时绕过：SPEC_VC_BYPASS=<原因> git commit ...\n"
+            "详细流程请查看 SKILL.md"
+        )
+
+    log_path = repo_root / ".git" / SUBAGENT_SESSIONS_FILENAME
+    if not log_path.exists():
+        return  # check_subagent_session 已处理
+
+    lines = [line for line in log_path.read_text().splitlines() if line.strip()]
+    if not lines:
+        return
+
+    last_line = lines[-1]
+    parts = last_line.split(" | ", 2)
+    if len(parts) < 3:
+        return  # fail-open（格式异常）
+    description = parts[2]
+
+    if anchor not in description:
+        raise ValidationError(
+            f"[spec-vc] Commit 被阻塞: session log 末行 description 不含 audit anchor (ADR-017)。\n"
+            f"  当前 anchor: {anchor}\n"
+            f"  末行 description: {description}\n"
+            "原因：audit 与本次 staged 内容无绑定，可能是历史 audit 复用或未读 staged diff。\n"
+            "下一步：启动新的 audit subagent，在其 description 中复述上述 anchor 字符串，"
+            "完成后重新 git commit。\n"
+            "紧急情况下可临时绕过：SPEC_VC_BYPASS=<原因> git commit ...\n"
+            "详细流程请查看 SKILL.md"
+        )
+
+
 def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "") -> int:
     """记录 Agent 工具调用到 subagent session log。
 
@@ -129,9 +177,10 @@ def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "
        tool_name 与 tool_input.description（Claude Code harness 的实际传值方式）
     3. JSON 解析失败 / 任何 IO 异常 → fail-open（return 0，不阻塞 commit）
 
-    跳过条件（ADR-013 保留）：
+    跳过条件：
+    - hook_event_name == "PostToolUseFailure"（ADR-017）：harness 显式失败事件
     - 解析后 tool_name 为空
-    - 解析后 description 为空或纯空白
+    - 解析后 description 为空或纯空白（ADR-013 保留）
     """
     if (not tool_name or not description) and not sys.stdin.isatty():
         try:
@@ -144,6 +193,8 @@ def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "
             except (json.JSONDecodeError, ValueError):
                 return 0
             if isinstance(payload, dict):
+                if payload.get("hook_event_name") == "PostToolUseFailure":
+                    return 0
                 if not tool_name:
                     candidate = payload.get("tool_name", "")
                     tool_name = candidate if isinstance(candidate, str) else ""
@@ -238,7 +289,7 @@ def run_commit_msg(message_file: Path) -> int:
     adr = parse_adr(adr_file)
     ensure_referenceable(adr, adr_id)
 
-    # [ADR-NNN] 额外检查: session 审计 + plan stage + Spec 完整性
+    # [ADR-NNN] 额外检查: session 审计 + plan stage + Spec 完整性 + anchor 绑定（ADR-017）
     if not bypass_reason:
         try:
             check_subagent_session(repo_root)
@@ -248,6 +299,7 @@ def run_commit_msg(message_file: Path) -> int:
             check_session_log_freshness(repo_root)
         except FileNotFoundError as e:
             raise ValidationError(str(e)) from e
+        _check_anchor_binding(repo_root, adr_id)
     _check_plan_stage(repo_root, config, adr_id)
     _check_spec_readiness_for_adr(repo_root, config, adr_id)
 

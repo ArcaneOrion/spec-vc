@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,12 +10,44 @@ from .gitops import run_git, staged_files
 
 COMMIT_MSG_FILENAME = "spec-vc-commit-msg"
 SUBAGENT_SESSIONS_FILENAME = "spec-vc-subagent-sessions.log"
+AUDIT_ANCHOR_FILENAME = "spec-vc-audit-anchor"
 
 
 def write_commit_message(repo_root: Path, message: str) -> Path:
     msg_path = repo_root / ".git" / COMMIT_MSG_FILENAME
     msg_path.write_text(message)
     return msg_path
+
+
+def compute_audit_anchor(repo_root: Path, adr_token: str) -> str:
+    """生成 audit anchor = '<adr_token>@<sha12>'。
+
+    sha12 = sha256(git diff --cached --no-renames --no-color)[:12]。
+    adr_token 形如 'ADR-017' 或 'ADR-none'（无方括号）。
+
+    设计意图（ADR-017）：把 staged 内容指纹和 ADR 引用绑定到 audit description，
+    迫使通过门禁的最小成本至少等于读一次 staged diff。
+    """
+    diff = run_git(
+        repo_root, "diff", "--cached", "--no-renames", "--no-color", check=False
+    )
+    sha12 = hashlib.sha256(diff.encode("utf-8")).hexdigest()[:12]
+    return f"{adr_token}@{sha12}"
+
+
+def write_audit_anchor(repo_root: Path, anchor: str) -> Path:
+    """写 anchor 到 .git/spec-vc-audit-anchor（单行，无 trailing newline）。"""
+    anchor_path = repo_root / ".git" / AUDIT_ANCHOR_FILENAME
+    anchor_path.write_text(anchor)
+    return anchor_path
+
+
+def read_audit_anchor(repo_root: Path) -> str | None:
+    """读 .git/spec-vc-audit-anchor 内容；文件不存在返回 None。"""
+    anchor_path = repo_root / ".git" / AUDIT_ANCHOR_FILENAME
+    if not anchor_path.exists():
+        return None
+    return anchor_path.read_text().strip()
 
 
 def check_subagent_session(repo_root: Path) -> None:

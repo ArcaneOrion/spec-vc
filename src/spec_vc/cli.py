@@ -460,15 +460,39 @@ def cmd_commit_prepare(args: argparse.Namespace) -> int:
     if getattr(args, 'message', None):
         write_commit_message(repo_root, args.message)
 
+    anchor_str: str | None = None
+    if getattr(args, 'message', None):
+        import re as _re
+        from .commit import compute_audit_anchor, write_audit_anchor
+        token_re = _re.compile(r"\[(ADR-(?:\d{3,}|none))\]")
+        first_line = args.message.splitlines()[0] if args.message else ""
+        m = token_re.search(first_line)
+        if m:
+            adr_token = m.group(1)
+            anchor_str = compute_audit_anchor(repo_root, adr_token)
+            write_audit_anchor(repo_root, anchor_str)
+
     _print_staged_and_specs(ctx)
 
     if getattr(args, 'message', None):
         print("[spec-vc] commit message 已写入 .git/spec-vc-commit-msg", file=sys.stderr)
+    if anchor_str is not None:
+        print(f"audit-anchor: {anchor_str}")
+        print(
+            f"[spec-vc] audit anchor 已写入 .git/spec-vc-audit-anchor: {anchor_str}",
+            file=sys.stderr,
+        )
+        print(
+            "[spec-vc] 启动 audit subagent 时，请在其 description 中复述该 anchor，"
+            "否则 commit-msg hook 将阻塞提交（ADR-017）",
+            file=sys.stderr,
+        )
     print("[spec-vc] 请完成 subagent 审计后直接 git commit。commit-msg hook 会自动校验：", file=sys.stderr)
     print("  1. subagent session log 非空且时间戳新鲜（PostToolUse hook 自动记录 Agent 工具调用，要求审计在 commit-msg 写入之后）", file=sys.stderr)
     print("  2. ADR 引用合法（[ADR-NNN] 或符合豁免规则的 [ADR-none]）", file=sys.stderr)
     print("  3. [ADR-NNN 时] plan stage ≥ implement-ready", file=sys.stderr)
     print("  4. [ADR-NNN 时] Spec 完整（dev-doc 已填写、形式化文件非骨架）", file=sys.stderr)
+    print("  5. [ADR-NNN 时] session log 末行 description 含 audit-anchor（ADR-017）", file=sys.stderr)
     print("详细流程请查看 SKILL.md", file=sys.stderr)
 
     return 0
