@@ -7,7 +7,6 @@ import re
 from datetime import date
 
 from .config import Config
-from ._sections import validate_title
 from .errors import ValidationError
 
 

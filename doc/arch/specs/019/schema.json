@@ -1,0 +1,85 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ReviewAssistanceConfig": {
+      "title": "ReviewAssistanceConfig",
+      "description": ".spec-vc.toml 中 [review_assistance] 段，控制 spec-vc review 报告输出。",
+      "type": "object",
+      "properties": {
+        "show_diff_summary": { "type": "boolean", "default": true },
+        "show_plan_context": { "type": "boolean", "default": true },
+        "show_spec_context": { "type": "boolean", "default": true },
+        "run_static_checks": { "type": "boolean", "default": true },
+        "static_check_timeout_seconds": { "type": "number", "minimum": 0.5, "default": 5.0 },
+        "context_summary_max_bytes": { "type": "integer", "minimum": 256, "default": 4096 }
+      }
+    },
+    "ReviewRecord_v019": {
+      "title": "ReviewRecord (ADR-019)",
+      "description": "ADR-018 的 ReviewRecord 新增 context_summary 字段；旧字段语义不变。",
+      "type": "object",
+      "required": ["anchor", "adr_token", "staged_sha12", "mode", "verified", "created_at"],
+      "properties": {
+        "anchor": { "type": "string", "pattern": "^ADR-(\\d{3,}|none)@[0-9a-f]{12}$" },
+        "adr_token": { "type": "string", "pattern": "^ADR-(\\d{3,}|none)$" },
+        "staged_sha12": { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+        "mode": { "type": "string", "enum": ["subagent", "simple"] },
+        "verified": { "type": "boolean" },
+        "note": { "type": "string" },
+        "subagent_log_tail": { "type": ["string", "null"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "context_summary": {
+          "type": "string",
+          "default": "",
+          "description": "ADR-019 新增：本次 review 输出的报告文本摘要，截断到 context_summary_max_bytes。"
+        }
+      },
+      "examples": [
+        {
+          "anchor": "ADR-019@abcdef012345",
+          "adr_token": "ADR-019",
+          "staged_sha12": "abcdef012345",
+          "mode": "simple",
+          "verified": true,
+          "note": "已读 review 报告，无问题。ADR-019@abcdef012345",
+          "subagent_log_tail": null,
+          "created_at": "2026-05-24T14:00:00+08:00",
+          "context_summary": "=== Staged Diff Summary ===\nsrc/spec_vc/review_assistance.py | +95 (new)\n...\n=== Your Response ===\nspec-vc commit\naudit-anchor: ADR-019@abcdef012345"
+        }
+      ]
+    },
+    "ReviewReport": {
+      "title": "ReviewReport 段结构",
+      "type": "object",
+      "required": ["sections"],
+      "properties": {
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["header", "body"],
+            "properties": {
+              "header": {
+                "type": "string",
+                "enum": [
+                  "=== Staged Diff Summary ===",
+                  "=== Plan Context (Design + Verification) ===",
+                  "=== Spec Context ===",
+                  "=== Static Checks ===",
+                  "=== Your Response ==="
+                ]
+              },
+              "body": { "type": "string" }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 5
+        }
+      }
+    }
+  }
+}
+```
+
+---

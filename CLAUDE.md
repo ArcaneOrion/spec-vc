@@ -61,10 +61,12 @@ uv run pytest tests/python/ -k "formalize"            # 按关键词筛选
 
 **commit message**: `<type>(<scope>): <subject> [ADR-NNN]`，subject 用中文简述。严格模式(hook)阻塞无 `[ADR-NNN]` 或 `[ADR-none]` 的 commit。
 
-**提交流程**（ADR-018 解耦版，supersedes ADR-011）：
+**提交流程**（ADR-018 解耦版 + ADR-019 审查助手，supersedes ADR-011）：
 - `spec-vc review --mode subagent|simple --message "..." [--note "..."] [--verified]`：独立审查命令
-  - 计算 anchor=ADR-XXX@<staged-diff-sha12>，写 `.git/spec-vc-review.json` + `.git/spec-vc-commit-msg`
-  - subagent 模式可启动 audit subagent 做代码审查（可选）
+  - 计算 anchor=ADR-XXX@<staged-diff-sha12>
+  - **ADR-019**：先调 assemble_review_report 输出 5 段审查报告到 stderr（Staged Diff Summary / Plan Context / Spec Context / Static Checks / Your Response），AI 读这份报告就是审查发生
+  - 写 `.git/spec-vc-review.json`（含 anchor / mode / verified / note + ADR-019 新增 `context_summary` 字段保存报告摘要）
+  - 写 `.git/spec-vc-commit-msg`
   - simple 模式必须在 `--note` 文本中复述 anchor 子串
   - `--verified` 标记用户已实际跑过代码验证使用
 - 用户可在审查后跑代码、点 UI、测接口验证使用
@@ -72,6 +74,7 @@ uv run pytest tests/python/ -k "formalize"            # 按关键词筛选
 - commit-msg hook 校验链：SPEC_VC_BYPASS → ADR 引用 → [ADR-NNN] plan stage + Spec + review.json (anchor 匹配 + mtime 新鲜 + simple 注解) → [ADR-none] 量化判定 → 放行
 - 所有阻塞错误统一为 BlockingError 结构（reason / current_state / fix_commands / docs_ref），AI 读 stderr 后可直接按 fix_commands 修复
 - `commit prepare` 保留为 deprecation alias（等价于 `review --mode subagent`），打 warning
+- **设计哲学（ADR-019）**：从 sticks（提高作弊成本）转 carrots（降低遵守成本）；review 是自检不是审批
 
 **SPEC_VC_BYPASS**: 环境变量逃生口，设 `<原因>` 后 `git commit` 跳过 review.json 校验、量化判定，ADR 引用校验、plan stage、Spec 完整性照常。bypass 写审计日志到 `.git/spec-vc-bypass.log`。
 

@@ -1,0 +1,88 @@
+# ADR-019 执行方案 001
+
+- **ADR**: ADR-019
+- **ADR Title**: spec-vc review 升级为审查助手：carrots 取代 sticks
+- **Stage**: validate
+- **Created At**: 2026-05-24T14:18:20
+- **Summary**: spec-vc review 从'声明式审计入口'升级为'审查助手'：输出 staged diff 摘要 + ADR plan context + Spec context + 静态检查；review.json 新增 context_summary 字段；设计哲学从 sticks（提高作弊成本）转 carrots（降低遵守成本）
+
+## Clarification
+
+- 动机与上下文: ADR-017/018 都在'提高作弊成本（sticks）'曲线上做文章，潜台词是假设 AI 默认不想审查需要拦住；但邻近项目实践 + ADR-018 自举验证暴露了真实问题：subagent 模式仍是 honor system，simple 模式只能强制看一眼 anchor 指纹不能强制看懂 diff。本 ADR 反转因果模型：AI 不审查不是因为不想，而是审查成本太高（subagent 30s-2min / 主动 Read 多文件理解 ADR/Spec 上下文）。设计哲学转向 carrots：让审查所需信息成为 spec-vc review 命令的免费副产品，AI 读取这份报告本身就是审查发生。新心智模型：写代码 → review（读到一份审查报告）→ 发现问题 → 改 → 满意 → commit——这才是 senior developer 的真实工作流，review 不是审批，是自检。
+- 目标与边界: 做：(1) 新增 src/spec_vc/review_assistance.py 含 5 函数（summarize_staged_diff / summarize_plan_context / summarize_spec_context / run_static_checks / assemble_review_report）；(2) cmd_review 在写 review.json 前先 print(report, file=sys.stderr)；(3) review.json 新增 context_summary 字段记录本次输出文本摘要（事后审计用）；(4) config.py 新增 ReviewAssistanceConfig（show_diff_summary / show_plan_context / show_spec_context / run_static_checks / static_check_timeout_seconds / context_summary_max_bytes）；(5) 全部 fail-open 设计——单段失败不阻塞 review，错误信息插入对应段；(6) SKILL.md / CLAUDE.md 同步新心智模型。不做：自动跑 pytest（太慢，AI 决定）；解析 diff 语义、自动建议修复；修改 commit-msg hook 校验链（保留 ADR-018）；hook 校验 context_summary 非空（carrots 不加 sticks）；动 subagent/simple 模式语义（保留为可选深度审查）；强制 AI 真读报告（仍 honor system，但成本曲线翻转）。
+- 设计与架构: 新模块 review_assistance.py 5 函数：(a) summarize_staged_diff(repo_root, max_files=20, max_hunks_per_file=3) → 用 git diff --cached --stat + 每个 staged 文件提取前 max_hunks 个 hunk 首行（@@ ... @@）；(b) summarize_plan_context(repo_root, adr_token, max_chars_per_section=600) → 读 plans/ADR-XXX-plan-*.md 编号最大文件，提取 Design and Architecture + Verification and Testing 两段（用 _sections.extract_section），各截断到 max_chars_per_section；(c) summarize_spec_context(repo_root, adr_token, max_lines_per_file=30) → 通过 Spec ADR 关联（spec.has_associated_spec）找到 Spec，读 contract.openapi.yaml + schema.json + behavior.feature 前 max_lines；(d) run_static_checks(repo_root, timeout) → 探测 ruff（subprocess.run with PATH lookup），缺失静默跳过；超时返回'超时跳过'文字；返回结构化输出（工具名 / 状态 / 错误数 / 前 N 行）；(e) assemble_review_report(repo_root, adr_token, config) → 按 config 开关拼接各段，每段前 '=== <段名> ===' 段头，末尾加 '=== Your Response ===' 指引段（无问题→spec-vc commit；有问题→改代码再 review）+ audit-anchor 行。cmd_review 流程：先计算 anchor（既有） → 调 assemble_review_report 得 report → print(report, file=sys.stderr) → record.context_summary = report[:context_summary_max_bytes] → write_review_and_msg（既有）。ReviewAssistanceConfig 默认值：show_diff_summary=True / show_plan_context=True / show_spec_context=True / run_static_checks=True / static_check_timeout_seconds=5 / context_summary_max_bytes=4096。输出格式：'=== Staged Diff Summary ===' / '=== Plan Context (Design + Verification) ===' / '=== Spec Context ===' / '=== Static Checks ===' / '=== Your Response ===' 五段。Hook 不校验 context_summary（carrots，不加 sticks）。fail-open 设计：每个 summarize_* 函数捕获异常返回'(本段获取失败: <错误摘要>)'，不阻塞 review。
+- 实现路径: 1. 新增 src/spec_vc/review_assistance.py 含 5 函数（fail-open / 各自单元可测）；2. src/spec_vc/config.py 加 ReviewAssistanceConfig 数据类 + load_config 加载 [review_assistance] 段；3. src/spec_vc/review.py ReviewRecord 加 context_summary: str 字段（default ''），read_review/write_review 序列化包含；4. src/spec_vc/cli.py cmd_review 在 build_review_record 后、write_review_and_msg 前调 assemble_review_report → print stderr → record.context_summary 写入；5. tests/python/test_review_assistance.py 新增 10 测试覆盖各函数分支 + cmd_review 端到端 + 配置开关 + fail-open + context_summary 截断；6. SKILL.md 6a 段重写（新心智模型 + 输出示例 + 配置说明 + 心智模型对比表）；7. CLAUDE.md 提交流程小节同步（review 是自检不是审批）；8. cp 新代码到 ~/.claude/skills/spec-vc/src/spec_vc/（review_assistance.py + config.py + review.py + cli.py）让本会话后续 commit 走新代码；9. 自举：本 ADR-019 自身 commit 走新流程 simple 模式 + --verified，stderr 应含完整 review 报告，bypass log 无新增。
+- 验证与测试: 单测 10 项：(1) summarize_staged_diff 输出含 --stat + 关键 hunk 首行；(2) summarize_plan_context 正确提取 Design and Architecture + Verification and Testing 两段；(3) summarize_plan_context ADR 无 plan 文件时返回 fallback 文字；(4) summarize_spec_context 正确读关联 Spec 的形式化文件前 N 行；(5) summarize_spec_context ADR 无关联 Spec 时返回 fallback 文字；(6) run_static_checks ruff 存在时返回工具输出摘要；(7) run_static_checks ruff 缺失时静默跳过返回'未检测到 ruff'；(8) assemble_review_report 按 config 开关拼接各段；(9) cmd_review stderr 含五个段头 + audit-anchor；(10) review.json.context_summary 写入且不超过 max_bytes。fail-open 测试：单段 mock 抛异常时其他段仍输出。回归 122 测试不挂。端到端自举：本 ADR-019 自身 commit 走 simple 模式 + --verified + --note 含 anchor，stderr 含完整 review 报告，bypass log 无新增条目。长期 KPI：bypass = 0 + AI 读输出后真审查的迹象（review 后到 commit 前 staged 内容变化 = AI 修了问题）。
+- 风险与回滚: 全部变更是新增 + 字段加在 review.json 末尾，回滚路径清晰：(1) git revert ADR-019 整链 commit；(2) ReviewAssistanceConfig 配置全关（show_* = false）等价于回到 ADR-018 行为；(3) review.json.context_summary 是新字段，旧代码（ADR-018 版 read_review）忽略额外字段（json.loads + 字段缺失用 default ''）；(4) cmd_review 异常时 assemble_review_report fail-open 返回错误提示但不阻塞写 review.json；(5) commit-msg hook 校验链未改，回滚不影响 hook 逻辑；(6) static_checks 工具缺失时静默跳过保证跨环境鲁棒。本变更不改 ADR-018 任何机制（review.json schema 仅新增字段、commit-msg hook 未动、quan 化判定未动），向后完全兼容。
+
+
+## Clarification History
+
+- 动机与上下文: ADR-017/018 都在'提高作弊成本（sticks）'曲线上做文章，潜台词是假设 AI 默认不想审查需要拦住；但邻近项目实践 + ADR-018 自举验证暴露了真实问题：subagent 模式仍是 honor system，simple 模式只能强制看一眼 anchor 指纹不能强制看懂 diff。本 ADR 反转因果模型：AI 不审查不是因为不想，而是审查成本太高（subagent 30s-2min / 主动 Read 多文件理解 ADR/Spec 上下文）。设计哲学转向 carrots：让审查所需信息成为 spec-vc review 命令的免费副产品，AI 读取这份报告本身就是审查发生。新心智模型：写代码 → review（读到一份审查报告）→ 发现问题 → 改 → 满意 → commit——这才是 senior developer 的真实工作流，review 不是审批，是自检。
+- 目标与边界: 做：(1) 新增 src/spec_vc/review_assistance.py 含 5 函数（summarize_staged_diff / summarize_plan_context / summarize_spec_context / run_static_checks / assemble_review_report）；(2) cmd_review 在写 review.json 前先 print(report, file=sys.stderr)；(3) review.json 新增 context_summary 字段记录本次输出文本摘要（事后审计用）；(4) config.py 新增 ReviewAssistanceConfig（show_diff_summary / show_plan_context / show_spec_context / run_static_checks / static_check_timeout_seconds / context_summary_max_bytes）；(5) 全部 fail-open 设计——单段失败不阻塞 review，错误信息插入对应段；(6) SKILL.md / CLAUDE.md 同步新心智模型。不做：自动跑 pytest（太慢，AI 决定）；解析 diff 语义、自动建议修复；修改 commit-msg hook 校验链（保留 ADR-018）；hook 校验 context_summary 非空（carrots 不加 sticks）；动 subagent/simple 模式语义（保留为可选深度审查）；强制 AI 真读报告（仍 honor system，但成本曲线翻转）。
+- 设计与架构: 新模块 review_assistance.py 5 函数：(a) summarize_staged_diff(repo_root, max_files=20, max_hunks_per_file=3) → 用 git diff --cached --stat + 每个 staged 文件提取前 max_hunks 个 hunk 首行（@@ ... @@）；(b) summarize_plan_context(repo_root, adr_token, max_chars_per_section=600) → 读 plans/ADR-XXX-plan-*.md 编号最大文件，提取 Design and Architecture + Verification and Testing 两段（用 _sections.extract_section），各截断到 max_chars_per_section；(c) summarize_spec_context(repo_root, adr_token, max_lines_per_file=30) → 通过 Spec ADR 关联（spec.has_associated_spec）找到 Spec，读 contract.openapi.yaml + schema.json + behavior.feature 前 max_lines；(d) run_static_checks(repo_root, timeout) → 探测 ruff（subprocess.run with PATH lookup），缺失静默跳过；超时返回'超时跳过'文字；返回结构化输出（工具名 / 状态 / 错误数 / 前 N 行）；(e) assemble_review_report(repo_root, adr_token, config) → 按 config 开关拼接各段，每段前 '=== <段名> ===' 段头，末尾加 '=== Your Response ===' 指引段（无问题→spec-vc commit；有问题→改代码再 review）+ audit-anchor 行。cmd_review 流程：先计算 anchor（既有） → 调 assemble_review_report 得 report → print(report, file=sys.stderr) → record.context_summary = report[:context_summary_max_bytes] → write_review_and_msg（既有）。ReviewAssistanceConfig 默认值：show_diff_summary=True / show_plan_context=True / show_spec_context=True / run_static_checks=True / static_check_timeout_seconds=5 / context_summary_max_bytes=4096。输出格式：'=== Staged Diff Summary ===' / '=== Plan Context (Design + Verification) ===' / '=== Spec Context ===' / '=== Static Checks ===' / '=== Your Response ===' 五段。Hook 不校验 context_summary（carrots，不加 sticks）。fail-open 设计：每个 summarize_* 函数捕获异常返回'(本段获取失败: <错误摘要>)'，不阻塞 review。
+- 实现路径: 1. 新增 src/spec_vc/review_assistance.py 含 5 函数（fail-open / 各自单元可测）；2. src/spec_vc/config.py 加 ReviewAssistanceConfig 数据类 + load_config 加载 [review_assistance] 段；3. src/spec_vc/review.py ReviewRecord 加 context_summary: str 字段（default ''），read_review/write_review 序列化包含；4. src/spec_vc/cli.py cmd_review 在 build_review_record 后、write_review_and_msg 前调 assemble_review_report → print stderr → record.context_summary 写入；5. tests/python/test_review_assistance.py 新增 10 测试覆盖各函数分支 + cmd_review 端到端 + 配置开关 + fail-open + context_summary 截断；6. SKILL.md 6a 段重写（新心智模型 + 输出示例 + 配置说明 + 心智模型对比表）；7. CLAUDE.md 提交流程小节同步（review 是自检不是审批）；8. cp 新代码到 ~/.claude/skills/spec-vc/src/spec_vc/（review_assistance.py + config.py + review.py + cli.py）让本会话后续 commit 走新代码；9. 自举：本 ADR-019 自身 commit 走新流程 simple 模式 + --verified，stderr 应含完整 review 报告，bypass log 无新增。
+- 验证与测试: 单测 10 项：(1) summarize_staged_diff 输出含 --stat + 关键 hunk 首行；(2) summarize_plan_context 正确提取 Design and Architecture + Verification and Testing 两段；(3) summarize_plan_context ADR 无 plan 文件时返回 fallback 文字；(4) summarize_spec_context 正确读关联 Spec 的形式化文件前 N 行；(5) summarize_spec_context ADR 无关联 Spec 时返回 fallback 文字；(6) run_static_checks ruff 存在时返回工具输出摘要；(7) run_static_checks ruff 缺失时静默跳过返回'未检测到 ruff'；(8) assemble_review_report 按 config 开关拼接各段；(9) cmd_review stderr 含五个段头 + audit-anchor；(10) review.json.context_summary 写入且不超过 max_bytes。fail-open 测试：单段 mock 抛异常时其他段仍输出。回归 122 测试不挂。端到端自举：本 ADR-019 自身 commit 走 simple 模式 + --verified + --note 含 anchor，stderr 含完整 review 报告，bypass log 无新增条目。长期 KPI：bypass = 0 + AI 读输出后真审查的迹象（review 后到 commit 前 staged 内容变化 = AI 修了问题）。
+- 风险与回滚: 全部变更是新增 + 字段加在 review.json 末尾，回滚路径清晰：(1) git revert ADR-019 整链 commit；(2) ReviewAssistanceConfig 配置全关（show_* = false）等价于回到 ADR-018 行为；(3) review.json.context_summary 是新字段，旧代码（ADR-018 版 read_review）忽略额外字段（json.loads + 字段缺失用 default ''）；(4) cmd_review 异常时 assemble_review_report fail-open 返回错误提示但不阻塞写 review.json；(5) commit-msg hook 校验链未改，回滚不影响 hook 逻辑；(6) static_checks 工具缺失时静默跳过保证跨环境鲁棒。本变更不改 ADR-018 任何机制（review.json schema 仅新增字段、commit-msg hook 未动、quan 化判定未动），向后完全兼容。
+
+
+## Motivation and Context
+
+ADR-017/018 都在'提高作弊成本（sticks）'曲线上做文章，潜台词是假设 AI 默认不想审查需要拦住；但邻近项目实践 + ADR-018 自举验证暴露了真实问题：subagent 模式仍是 honor system，simple 模式只能强制看一眼 anchor 指纹不能强制看懂 diff。本 ADR 反转因果模型：AI 不审查不是因为不想，而是审查成本太高（subagent 30s-2min / 主动 Read 多文件理解 ADR/Spec 上下文）。设计哲学转向 carrots：让审查所需信息成为 spec-vc review 命令的免费副产品，AI 读取这份报告本身就是审查发生。新心智模型：写代码 → review（读到一份审查报告）→ 发现问题 → 改 → 满意 → commit——这才是 senior developer 的真实工作流，review 不是审批，是自检。
+
+
+## Goals and Boundaries
+
+做：(1) 新增 src/spec_vc/review_assistance.py 含 5 函数（summarize_staged_diff / summarize_plan_context / summarize_spec_context / run_static_checks / assemble_review_report）；(2) cmd_review 在写 review.json 前先 print(report, file=sys.stderr)；(3) review.json 新增 context_summary 字段记录本次输出文本摘要（事后审计用）；(4) config.py 新增 ReviewAssistanceConfig（show_diff_summary / show_plan_context / show_spec_context / run_static_checks / static_check_timeout_seconds / context_summary_max_bytes）；(5) 全部 fail-open 设计——单段失败不阻塞 review，错误信息插入对应段；(6) SKILL.md / CLAUDE.md 同步新心智模型。不做：自动跑 pytest（太慢，AI 决定）；解析 diff 语义、自动建议修复；修改 commit-msg hook 校验链（保留 ADR-018）；hook 校验 context_summary 非空（carrots 不加 sticks）；动 subagent/simple 模式语义（保留为可选深度审查）；强制 AI 真读报告（仍 honor system，但成本曲线翻转）。
+
+
+## Design and Architecture
+
+新模块 review_assistance.py 5 函数：(a) summarize_staged_diff(repo_root, max_files=20, max_hunks_per_file=3) → 用 git diff --cached --stat + 每个 staged 文件提取前 max_hunks 个 hunk 首行（@@ ... @@）；(b) summarize_plan_context(repo_root, adr_token, max_chars_per_section=600) → 读 plans/ADR-XXX-plan-*.md 编号最大文件，提取 Design and Architecture + Verification and Testing 两段（用 _sections.extract_section），各截断到 max_chars_per_section；(c) summarize_spec_context(repo_root, adr_token, max_lines_per_file=30) → 通过 Spec ADR 关联（spec.has_associated_spec）找到 Spec，读 contract.openapi.yaml + schema.json + behavior.feature 前 max_lines；(d) run_static_checks(repo_root, timeout) → 探测 ruff（subprocess.run with PATH lookup），缺失静默跳过；超时返回'超时跳过'文字；返回结构化输出（工具名 / 状态 / 错误数 / 前 N 行）；(e) assemble_review_report(repo_root, adr_token, config) → 按 config 开关拼接各段，每段前 '=== <段名> ===' 段头，末尾加 '=== Your Response ===' 指引段（无问题→spec-vc commit；有问题→改代码再 review）+ audit-anchor 行。cmd_review 流程：先计算 anchor（既有） → 调 assemble_review_report 得 report → print(report, file=sys.stderr) → record.context_summary = report[:context_summary_max_bytes] → write_review_and_msg（既有）。ReviewAssistanceConfig 默认值：show_diff_summary=True / show_plan_context=True / show_spec_context=True / run_static_checks=True / static_check_timeout_seconds=5 / context_summary_max_bytes=4096。输出格式：'=== Staged Diff Summary ===' / '=== Plan Context (Design + Verification) ===' / '=== Spec Context ===' / '=== Static Checks ===' / '=== Your Response ===' 五段。Hook 不校验 context_summary（carrots，不加 sticks）。fail-open 设计：每个 summarize_* 函数捕获异常返回'(本段获取失败: <错误摘要>)'，不阻塞 review。
+
+
+## Implementation Path
+
+1. 新增 src/spec_vc/review_assistance.py 含 5 函数（fail-open / 各自单元可测）；2. src/spec_vc/config.py 加 ReviewAssistanceConfig 数据类 + load_config 加载 [review_assistance] 段；3. src/spec_vc/review.py ReviewRecord 加 context_summary: str 字段（default ''），read_review/write_review 序列化包含；4. src/spec_vc/cli.py cmd_review 在 build_review_record 后、write_review_and_msg 前调 assemble_review_report → print stderr → record.context_summary 写入；5. tests/python/test_review_assistance.py 新增 10 测试覆盖各函数分支 + cmd_review 端到端 + 配置开关 + fail-open + context_summary 截断；6. SKILL.md 6a 段重写（新心智模型 + 输出示例 + 配置说明 + 心智模型对比表）；7. CLAUDE.md 提交流程小节同步（review 是自检不是审批）；8. cp 新代码到 ~/.claude/skills/spec-vc/src/spec_vc/（review_assistance.py + config.py + review.py + cli.py）让本会话后续 commit 走新代码；9. 自举：本 ADR-019 自身 commit 走新流程 simple 模式 + --verified，stderr 应含完整 review 报告，bypass log 无新增。
+
+
+## Verification and Testing
+
+单测 10 项：(1) summarize_staged_diff 输出含 --stat + 关键 hunk 首行；(2) summarize_plan_context 正确提取 Design and Architecture + Verification and Testing 两段；(3) summarize_plan_context ADR 无 plan 文件时返回 fallback 文字；(4) summarize_spec_context 正确读关联 Spec 的形式化文件前 N 行；(5) summarize_spec_context ADR 无关联 Spec 时返回 fallback 文字；(6) run_static_checks ruff 存在时返回工具输出摘要；(7) run_static_checks ruff 缺失时静默跳过返回'未检测到 ruff'；(8) assemble_review_report 按 config 开关拼接各段；(9) cmd_review stderr 含五个段头 + audit-anchor；(10) review.json.context_summary 写入且不超过 max_bytes。fail-open 测试：单段 mock 抛异常时其他段仍输出。回归 122 测试不挂。端到端自举：本 ADR-019 自身 commit 走 simple 模式 + --verified + --note 含 anchor，stderr 含完整 review 报告，bypass log 无新增条目。长期 KPI：bypass = 0 + AI 读输出后真审查的迹象（review 后到 commit 前 staged 内容变化 = AI 修了问题）。
+
+
+## Risks and Rollback
+
+全部变更是新增 + 字段加在 review.json 末尾，回滚路径清晰：(1) git revert ADR-019 整链 commit；(2) ReviewAssistanceConfig 配置全关（show_* = false）等价于回到 ADR-018 行为；(3) review.json.context_summary 是新字段，旧代码（ADR-018 版 read_review）忽略额外字段（json.loads + 字段缺失用 default ''）；(4) cmd_review 异常时 assemble_review_report fail-open 返回错误提示但不阻塞写 review.json；(5) commit-msg hook 校验链未改，回滚不影响 hook 逻辑；(6) static_checks 工具缺失时静默跳过保证跨环境鲁棒。本变更不改 ADR-018 任何机制（review.json schema 仅新增字段、commit-msg hook 未动、quan 化判定未动），向后完全兼容。
+
+
+## Affected Areas
+
+待补充
+
+## Pre-Change Validation
+
+Spec-019 dev-doc 6 必查区块全填 + 3 形式化文件已生成。spec check 9/9 全过。baseline pytest 122/122 全过。设计理念已固化层次：carrots（降低遵守成本）取代 sticks（提高作弊成本）—— spec-vc review 升级为审查助手，输出 staged diff 摘要 + ADR plan context + Spec context + 静态检查共 5 段到 stderr，AI 读取这份报告本身就是审查发生。新心智模型：写代码 → review（读到一份审查报告）→ 发现问题 → 改 → 满意 → commit。覆盖盲区：src/spec_vc/review_assistance.py 不存在（待新建）；config.py 无 ReviewAssistanceConfig；review.py.ReviewRecord 无 context_summary 字段；cli.py.cmd_review 流程未插入 assemble_review_report 调用；tests/python/test_review_assistance.py 不存在。设计选择已定：hook 不校验 context_summary（保留 carrots 纯粹性，避免破坏哲学）；本变更 commit 走 simple 模式 + --verified（验证 AI 读报告即可完成审查的假设）；fail-open 单段失败不阻塞 review。
+
+
+## Post-Change Validation
+
+代码 + 测试 + 文档全部实施完成。新增模块 src/spec_vc/review_assistance.py 含 5 fail-open 函数：(a) summarize_staged_diff 用 git diff --stat + 每文件前 3 个 hunk header；(b) summarize_plan_context 提取 plan Design and Architecture + Verification and Testing 两段，每段截断 600 字符；(c) summarize_spec_context 读关联 Spec 三个形式化文件前 30 行；(d) run_static_checks shutil.which 探测 ruff 缺失静默跳过，subprocess.TimeoutExpired 超时跳过；(e) assemble_review_report 按 config 开关拼接 + Your Response 段含 audit-anchor。改造模块：config.py 加 ReviewAssistanceConfig（6 字段：4 show_* 开关 + static_check_timeout_seconds + context_summary_max_bytes）+ load_config 加载 [review_assistance] 段；review.py ReviewRecord 加 context_summary 字段（default ''），read_review 用 data.get 兼容旧 ADR-018 格式；cli.py cmd_review 在 build_review_record 后插入 assemble_review_report 调用 → print stderr → record.context_summary 截断写入。新测试 17 项：summarize_staged_diff 3 项（含 hunk / 空 staging / fail-open）+ summarize_plan_context 3 项（提取两段 / 无 plan / 截断）+ summarize_spec_context 2 项（输出形式化文件 / 无关联 Spec）+ run_static_checks 2 项（ruff 缺失 / 超时）+ assemble_review_report 3 项（全段 / 开关 / fail-open）+ cmd_review 集成 2 项（stderr 5 段头 + context_summary 截断）+ 回归 2 项（hook 对含/不含 context_summary review.json 都放行）。单测 139/139 全过（122 原 + 17 新增）。文档同步：SKILL.md 6a 段加 ADR-019 审查助手输出格式 + 新心智模型对比表 + 配置说明；CLAUDE.md 提交流程小节加 ADR-019 设计哲学说明（sticks→carrots）。代码已 cp 到 ~/.claude/skills/spec-vc/src/spec_vc/（review_assistance.py + config.py + review.py + cli.py）让本会话后续 commit 走新代码。设计哲学验证：本 ADR-019 自身 commit 走 simple 模式 + --verified，AI 读 stderr 中 5 段报告即完成审查（无需 audit subagent）。集成验证将由本 ADR-019 自身 commit 完成。
+
+
+## Closure Summary
+
+待补充
+
+## References
+
+- **Commits**: 待补充
+- **Plan**: 待补充
+
+## Checkpoints
+
+- [ ] 澄清完成
+- [ ] 前置验证完成
+- [ ] 实施完成
+- [ ] 后置验证完成
+- [ ] ADR 回填完成

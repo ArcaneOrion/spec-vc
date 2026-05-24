@@ -42,6 +42,7 @@
 | ADR-016 | PostToolUse hook 从 stdin 读 JSON 修复 description 取值 | Proposed | 2026-05-14 |
 | ADR-017 | commit-msg 审计证据由间接代理升级为内容绑定 | Proposed | 2026-05-17 |
 | ADR-018 | 审查/提交解耦：spec-vc review 独立、审计证据脱离 PostToolUse hook | Proposed | 2026-05-24 |
+| ADR-019 | spec-vc review 升级为审查助手：carrots 取代 sticks | Proposed | 2026-05-24 |
 
 ## 状态图例
 

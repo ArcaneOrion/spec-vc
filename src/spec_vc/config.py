@@ -44,6 +44,17 @@ class LightweightConfig:
 
 
 @dataclass(slots=True)
+class ReviewAssistanceConfig:
+    """ADR-019: spec-vc review 审查助手输出控制。"""
+    show_diff_summary: bool = True
+    show_plan_context: bool = True
+    show_spec_context: bool = True
+    run_static_checks: bool = True
+    static_check_timeout_seconds: float = 5.0
+    context_summary_max_bytes: int = 4096
+
+
+@dataclass(slots=True)
 class ProjectConfig:
     adr_dir: str = "doc/arch"
     strict: bool = True
@@ -56,6 +67,7 @@ class Config:
     adr_required: AdrRequiredConfig = field(default_factory=AdrRequiredConfig)
     spec: SpecConfig = field(default_factory=SpecConfig)
     lightweight: LightweightConfig = field(default_factory=LightweightConfig)
+    review_assistance: ReviewAssistanceConfig = field(default_factory=ReviewAssistanceConfig)
 
 
 def _get_val(section: str, key: str, data: dict, default: object, expected_type: type) -> object:
@@ -96,6 +108,19 @@ def load_config(repo_root: Path) -> Config:
         config.lightweight.lines_max = _get_val("lightweight", "lines_max", lightweight, config.lightweight.lines_max, int)
         config.lightweight.type_whitelist = _get_val("lightweight", "type_whitelist", lightweight, config.lightweight.type_whitelist, list)
         config.lightweight.require_user_verified = _get_val("lightweight", "require_user_verified", lightweight, config.lightweight.require_user_verified, bool)
+        review_assistance = data.get("review_assistance", {})
+        config.review_assistance.show_diff_summary = _get_val("review_assistance", "show_diff_summary", review_assistance, config.review_assistance.show_diff_summary, bool)
+        config.review_assistance.show_plan_context = _get_val("review_assistance", "show_plan_context", review_assistance, config.review_assistance.show_plan_context, bool)
+        config.review_assistance.show_spec_context = _get_val("review_assistance", "show_spec_context", review_assistance, config.review_assistance.show_spec_context, bool)
+        config.review_assistance.run_static_checks = _get_val("review_assistance", "run_static_checks", review_assistance, config.review_assistance.run_static_checks, bool)
+        raw_timeout = review_assistance.get("static_check_timeout_seconds", config.review_assistance.static_check_timeout_seconds)
+        if not isinstance(raw_timeout, (int, float)):
+            raise ValidationError(
+                f".spec-vc.toml [review_assistance] static_check_timeout_seconds 类型错误: "
+                f"期望 number，实际 {type(raw_timeout).__name__} (值: {raw_timeout!r})"
+            )
+        config.review_assistance.static_check_timeout_seconds = float(raw_timeout)
+        config.review_assistance.context_summary_max_bytes = _get_val("review_assistance", "context_summary_max_bytes", review_assistance, config.review_assistance.context_summary_max_bytes, int)
     env_adr_dir = os.getenv("ADR_DIR")
     if env_adr_dir:
         config.project.adr_dir = env_adr_dir

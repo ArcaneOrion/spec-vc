@@ -538,6 +538,12 @@ def cmd_review(args: argparse.Namespace) -> int:
             print(err.format(), file=sys.stderr)
             return 1
 
+    from .review_assistance import assemble_review_report
+    report = assemble_review_report(repo_root, adr_token, record.anchor, config.review_assistance)
+    print(report, file=sys.stderr)
+    print("", file=sys.stderr)
+    record.context_summary = report[: config.review_assistance.context_summary_max_bytes]
+
     write_review_and_msg(repo_root, record, message)
 
     _print_staged_and_specs(ctx)

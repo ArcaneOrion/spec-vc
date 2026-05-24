@@ -28,7 +28,7 @@ ADR_TOKEN_RE = re.compile(r"\[(ADR-none|ADR-\?+|ADR-\d{3,})\]")
 
 @dataclass(slots=True)
 class ReviewRecord:
-    """.git/spec-vc-review.json 内容契约（Spec-018 ReviewRecord）。"""
+    """.git/spec-vc-review.json 内容契约（Spec-018 ReviewRecord + ADR-019 context_summary）。"""
 
     anchor: str
     adr_token: str
@@ -38,6 +38,7 @@ class ReviewRecord:
     note: str = ""
     subagent_log_tail: str | None = None
     created_at: str = field(default_factory=lambda: datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
+    context_summary: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -73,6 +74,7 @@ def read_review(repo_root: Path) -> ReviewRecord | None:
             note=str(data.get("note", "")),
             subagent_log_tail=data.get("subagent_log_tail"),
             created_at=str(data["created_at"]),
+            context_summary=str(data.get("context_summary", "")),
         )
     except (KeyError, TypeError, ValueError):
         return None

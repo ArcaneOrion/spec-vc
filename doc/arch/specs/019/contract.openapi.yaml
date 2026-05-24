@@ -1,0 +1,118 @@
+```yaml
+openapi: "3.0.3"
+info:
+  title: spec-vc review 审查助手输出契约（ADR-019）
+  version: "0.1.0"
+  description: |
+    本 Spec 的接口不对外暴露 HTTP，全部以 Python 函数 + CLI stderr 输出 + JSON 文件字段表达。
+
+paths:
+  /internal/review-assistance/summarize-staged-diff:
+    get:
+      summary: summarize_staged_diff —— staged 内容摘要
+      description: |
+        签名: summarize_staged_diff(repo_root: Path, max_files: int = 20, max_hunks_per_file: int = 3) -> str
+
+        行为:
+          1. 调 git diff --cached --stat 获取 staged file 列表 + 增删行数
+          2. 对每个 staged 文件，调 git diff --cached <file>，提取前 max_hunks_per_file 个 hunk 首行（@@ ... @@ 行）
+          3. 拼接输出，前缀段头 "=== Staged Diff Summary ==="
+          4. staged 区为空 → 返回 "(无 staged changes)"
+          5. fail-open: 任何异常 → 返回 "(本段获取失败: <错误摘要>)"，不抛异常
+      responses:
+        "0": { description: 已返回摘要文本 }
+
+  /internal/review-assistance/summarize-plan-context:
+    get:
+      summary: summarize_plan_context —— 关联 ADR plan 摘要
+      description: |
+        签名: summarize_plan_context(repo_root: Path, adr_token: str, max_chars_per_section: int = 600) -> str
+
+        行为:
+          1. 解析 adr_token 得 adr_id
+          2. 查 doc/arch/plans/ADR-{adr_id}-plan-*.md，取编号最大的文件
+          3. 用 _sections.extract_section 提取 "Design and Architecture" + "Verification and Testing"
+          4. 每段截断到 max_chars_per_section 字符（末尾加 "... (truncated)"）
+          5. 拼接输出，前缀段头 "=== Plan Context (Design + Verification) ==="
+          6. ADR 无 plan 文件 → 返回 "(ADR-{adr_id} 无活跃 plan，已 close 或未启动)"
+          7. fail-open
+      responses:
+        "0": { description: 已返回摘要文本 }
+
+  /internal/review-assistance/summarize-spec-context:
+    get:
+      summary: summarize_spec_context —— 关联 Spec 形式化契约摘要
+      description: |
+        签名: summarize_spec_context(repo_root: Path, adr_token: str, max_lines_per_file: int = 30) -> str
+
+        行为:
+          1. 通过 spec.has_associated_spec / relevant_spec_issues 找到关联 Spec
+          2. 读取每个关联 Spec 的 contract.openapi.yaml / schema.json / behavior.feature 前 max_lines_per_file 行
+          3. 拼接输出，前缀段头 "=== Spec Context ==="，子段标题 "--- Spec-NNN/<filename> ---"
+          4. ADR 无关联 Spec → 返回 "(ADR-{adr_id} 无关联 Spec)"
+          5. fail-open
+      responses:
+        "0": { description: 已返回摘要文本 }
+
+  /internal/review-assistance/run-static-checks:
+    get:
+      summary: run_static_checks —— 可选轻量静态检查
+      description: |
+        签名: run_static_checks(repo_root: Path, timeout: float = 5.0) -> str
+
+        行为:
+          1. shutil.which("ruff") 探测
+          2. 存在 → subprocess.run ["ruff", "check", "src/"] with timeout
+             - 成功 → "ruff: 0 errors"
+             - 有 errors → "ruff: N errors\n<前 10 行>"
+             - 超时 → "ruff: 超时（>{timeout}s）跳过"
+          3. 不存在 → "(未检测到 ruff，跳过静态检查)"
+          4. 拼接输出，前缀段头 "=== Static Checks ==="
+          5. fail-open
+
+        非目标: 不跑 pytest（耗时）；不解析 ruff 输出语义；不强制项目装 ruff
+      responses:
+        "0": { description: 已返回摘要文本 }
+
+  /internal/review-assistance/assemble-review-report:
+    get:
+      summary: assemble_review_report —— 拼接完整审查报告
+      description: |
+        签名: assemble_review_report(repo_root: Path, adr_token: str, anchor: str, config: ReviewAssistanceConfig) -> str
+
+        行为:
+          1. 按 config 开关逐段调用 4 个 summarize/run 函数
+          2. 末尾追加 "=== Your Response ===" 段，固定内容:
+             "看完上述信息后:
+                ✓ 无问题 → spec-vc commit
+                ✗ 有问题 → 改代码后重跑 spec-vc review
+              audit-anchor: <anchor>"
+          3. 段间空行分隔
+          4. fail-open: 单段抛异常 → 该段插入 "(本段获取失败: ...)"
+      responses:
+        "0": { description: 已返回完整报告 }
+
+  /internal/cmd-review-flow:
+    post:
+      summary: cmd_review 流程改动（ADR-019）
+      description: |
+        在 ADR-018 流程基础上插入审查报告输出：
+
+        既有流程 (ADR-018):
+          1. _repo_root + load_config + gather_commit_context
+          2. 校验 staged / Spec 就绪 / --message / ADR token / mode/note
+          3. build_review_record
+          4. simple 模式校验 note 含 anchor
+          5. write_review_and_msg
+          6. _print_staged_and_specs + 提示
+
+        新增 (ADR-019，第 4 步后第 5 步前):
+          4a. report = assemble_review_report(repo_root, adr_token, record.anchor, config.review_assistance)
+          4b. print(report, file=sys.stderr)
+          4c. record.context_summary = report[:config.review_assistance.context_summary_max_bytes]
+      responses:
+        "0": { description: review.json 与 commit-msg 已落盘 + 报告已输出 }
+        "1": { description: 阻塞（既有 BlockingError 路径不变） }
+```
+
+---
