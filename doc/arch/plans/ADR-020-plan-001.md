@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-020
 - **ADR Title**: spec-vc 做减法：删除 reasoning scaffolding，保留 operational harness
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-24T16:05:15
 - **Summary**: spec-vc 做减法：commit-msg hook 校验链从 6 步压到 4 步（删 plan stage / simple note anchor / [ADR-none] 量化 / require_user_verified），删除 lightweight.py，相应删除测试；新增 ADR 写作规范硬约束到 CLAUDE.md（自包含可读 / file:line 锚点 / 禁宣示句式）；保留 BYPASS audit / ADR 引用 / Spec 完整性 / review.json anchor+mtime / BlockingError / review 助手报告
 
@@ -72,12 +72,14 @@ Spec 创作协议完成：Spec-020 dev-doc 6 必查区块全填 + 3 形式化文
 
 ## Closure Summary
 
-待补充
+spec-vc 做减法：按 VILA-Lab 判别法删除 reasoning scaffolding，保留 operational harness。删除：hooks.py:_check_plan_stage / _check_lightweight / _load_stage_for_adr 函数 + ACTIVE_FILE_NAME / PLAN_DIR_NAME / IMPLEMENT_READY_OR_LATER 常量；_check_review_record 中 simple 模式 note 含 anchor 校验 + require_user_verified 升级开关；lightweight.py 整个文件；config.py:LightweightConfig dataclass + load_config [lightweight] 段；cli.py:cmd_review simple 模式 --note 必填 + anchor 子串校验；14 项测试。保留：BYPASS audit / ADR 引用 / Spec 完整性 / review.json (anchor + mtime) / BlockingError / ADR-019 review 助手报告。CLAUDE.md 新增 ADR 写作规范段（5 条硬约束：自包含可读 / file:line 锚点 / 禁宣示句式 / 哲学 ≤ 1 段 / 行为假设需数据支撑），引用 doc/arch/adr-020.md 为依据。SKILL.md 6b 段重写为 4 步校验链。测试 139→125（净删 14 项，无新增）。设计理念依据：VILA-Lab arXiv 2604.14228v1 (Claude Code 98.4%/1.6%) + Anthropic Building Effective Agents + Claude 4.x prompt engineering guide + Cognition Don't Build Multi-Agents（详见 doc/arch/adr-020.md Context 段与 References 段）。自举端到端：commit 62ee2c5 走 simple 模式 + --note 不含 anchor（验证旧 sticks 已删）+ --verified（验证仅作记录不阻塞），4 步 hook 全过，.git/spec-vc-bypass.log 无新增条目。本 ADR partial supersede ADR-011 (plan stage) / ADR-018 (量化判定 / require_user_verified / simple note anchor)；affirm ADR-019 (review 助手 = environment design 核心) / ADR-012 (错误可执行 = 降低 AI 消费成本)。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-020-plan-001.md
+
 
 ## Checkpoints
 
