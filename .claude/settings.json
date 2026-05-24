@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use"
+            "command": "$HOME/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use"
           }
         ]
       }
