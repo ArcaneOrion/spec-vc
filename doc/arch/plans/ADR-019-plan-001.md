@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-019
 - **ADR Title**: spec-vc review 升级为审查助手：carrots 取代 sticks
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-24T14:18:20
 - **Summary**: spec-vc review 从'声明式审计入口'升级为'审查助手'：输出 staged diff 摘要 + ADR plan context + Spec context + 静态检查；review.json 新增 context_summary 字段；设计哲学从 sticks（提高作弊成本）转 carrots（降低遵守成本）
 
@@ -72,12 +72,14 @@ Spec-019 dev-doc 6 必查区块全填 + 3 形式化文件已生成。spec check 
 
 ## Closure Summary
 
-待补充
+spec-vc review 升级为审查助手：carrots 取代 sticks。新增 src/spec_vc/review_assistance.py 含 5 fail-open 函数（summarize_staged_diff / summarize_plan_context / summarize_spec_context / run_static_checks / assemble_review_report）。cmd_review 在写 review.json 前先输出 5 段审查报告到 stderr（Staged Diff Summary / Plan Context / Spec Context / Static Checks / Your Response），并把报告摘要写入 review.json.context_summary 字段作为事后审计凭证。新增 ReviewAssistanceConfig 配置项（6 字段：4 show_* 开关 + static_check_timeout_seconds + context_summary_max_bytes）。新增 17 单测覆盖各 summarize 函数分支 + assemble fail-open + cmd_review 集成 + 向后兼容旧 ADR-018 review.json。设计哲学转向：从 sticks（提高作弊成本）转 carrots（降低遵守成本）—— 让审查所需信息成为 review 命令的免费副产品，AI 读取这份报告本身就是审查发生。新心智模型：写代码 → review（读到一份审查报告）→ 发现问题 → 改 → 满意 → commit；review 是自检不是审批。哲学验证（自举端到端）：本 ADR-019 自身 commit 1df1db4 走 simple 模式 + --verified，stderr 5 段审查报告中 ruff 段暴露了 src/spec_vc/adr.py 的 unused import 'validate_title'，AI 读完报告自然修复后再 commit，全程零 bypass。Hook 不校验 context_summary（carrots 不加 sticks，保持设计哲学纯粹性）。补充 ADR-018 不动 commit-msg hook 校验链；fail-open 单段失败不阻塞 review 流程。pytest 139/139 全过（122 原 + 17 新增）。本 ADR-019 端到端集成验证：1df1db4 通过新 review 助手报告路径 + commit-msg hook 既有校验链 + bypass log 无新增条目。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-019-plan-001.md
+
 
 ## Checkpoints
 
