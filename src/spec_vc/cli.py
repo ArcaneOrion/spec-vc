@@ -25,13 +25,18 @@ from .change import (
     read_active_change_context,
 )
 from .config import load_config
-from .errors import SpecVCError, UsageError
+from .errors import BlockingError, SpecVCError, UsageError
 from .gitops import repo_root_from, run_git
 from .hooks import run_commit_msg, run_prepare_commit_msg
 from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
-from .commit import gather_commit_context, write_commit_message
+from .commit import gather_commit_context, write_commit_message, COMMIT_MSG_FILENAME
+from .review import (
+    build_review_record,
+    extract_adr_token,
+    write_review_and_msg,
+)
 from .spec import (
     check_spec_readiness,
     create_spec,
@@ -444,66 +449,184 @@ def _print_staged_and_specs(ctx):
             print(f"  Spec-{spec_id}: dev-doc [{doc_status}], formal: {', '.join(formal) if formal else '无'}", file=sys.stderr)
 
 
-def cmd_commit_prepare(args: argparse.Namespace) -> int:
+def cmd_review(args: argparse.Namespace) -> int:
+    """ADR-018: spec-vc review —— 独立审查命令，写 review.json + commit-msg。"""
     repo_root = _repo_root()
     config = load_config(repo_root)
     ctx = gather_commit_context(repo_root, config)
 
     if not ctx.staged_files:
-        print("(无 staged changes，无需提交)")
-        return 0
+        err = BlockingError(
+            reason="staged 区为空，无审查内容",
+            current_state="git diff --cached: 空（无 staged 变更）",
+            fix_commands=["git add <file>...", 'spec-vc review --message "..."'],
+            docs_ref=["SKILL.md#6-commit", "ADR-018"],
+        )
+        print(err.format(), file=sys.stderr)
+        return 1
 
     if ctx.spec_readiness_issues:
         _print_spec_readiness_issues(ctx.spec_readiness_issues)
         return 1
 
-    if getattr(args, 'message', None):
-        write_commit_message(repo_root, args.message)
+    message: str = getattr(args, "message", None) or ""
+    if not message:
+        err = BlockingError(
+            reason="缺少 --message 参数",
+            current_state="未提供完整 commit message",
+            fix_commands=['spec-vc review --message "<type>(<scope>): <subject> [ADR-NNN]"'],
+            docs_ref=["SKILL.md#6-commit"],
+        )
+        print(err.format(), file=sys.stderr)
+        return 1
 
-    anchor_str: str | None = None
-    if getattr(args, 'message', None):
-        import re as _re
-        from .commit import compute_audit_anchor, write_audit_anchor
-        token_re = _re.compile(r"\[(ADR-(?:\d{3,}|none))\]")
-        first_line = args.message.splitlines()[0] if args.message else ""
-        m = token_re.search(first_line)
-        if m:
-            adr_token = m.group(1)
-            anchor_str = compute_audit_anchor(repo_root, adr_token)
-            write_audit_anchor(repo_root, anchor_str)
+    adr_token = extract_adr_token(message)
+    if adr_token is None:
+        first_line = message.splitlines()[0] if message else "(empty)"
+        err = BlockingError(
+            reason="commit message subject 缺少 [ADR-NNN] / [ADR-none] 引用",
+            current_state=f"subject: {first_line}",
+            fix_commands=[
+                'spec-vc review --message "feat(...): ... [ADR-NNN]"',
+                'spec-vc review --message "docs(...): ... [ADR-none]"  # 仅限轻量改动',
+            ],
+            docs_ref=["SKILL.md#6-commit", "ADR-018"],
+        )
+        print(err.format(), file=sys.stderr)
+        return 1
+
+    if adr_token.startswith("ADR-?"):
+        err = BlockingError(
+            reason="commit message 含未填充的 [ADR-???] 槽位",
+            current_state=f"subject: {message.splitlines()[0]}",
+            fix_commands=[
+                'spec-vc review --message "...[ADR-NNN]"  # 替换为具体 ADR 编号',
+                'spec-vc review --message "...[ADR-none]"  # 显式豁免',
+            ],
+            docs_ref=["SKILL.md#6-commit"],
+        )
+        print(err.format(), file=sys.stderr)
+        return 1
+
+    mode = getattr(args, "mode", "subagent") or "subagent"
+    verified = bool(getattr(args, "verified", False))
+    note = getattr(args, "note", "") or ""
+
+    record = build_review_record(repo_root, adr_token, mode, verified, note)
+
+    if mode == "simple":
+        if not note:
+            err = BlockingError(
+                reason="simple 模式必须提供 --note",
+                current_state=f"mode: simple\nnote: (empty)\nanchor: {record.anchor}",
+                fix_commands=[
+                    f'spec-vc review --mode simple --message "..." --note "<审查结论，必须含 {record.anchor}>"',
+                ],
+                docs_ref=["ADR-018", "Spec-018"],
+            )
+            print(err.format(), file=sys.stderr)
+            return 1
+        if record.anchor not in note:
+            err = BlockingError(
+                reason="simple 模式 --note 不含 anchor 子串",
+                current_state=f"anchor: {record.anchor}\nnote: {note}",
+                fix_commands=[
+                    f'spec-vc review --mode simple --message "..." --note "<结论，必须含 {record.anchor}>"',
+                ],
+                docs_ref=["ADR-018", "Spec-018"],
+            )
+            print(err.format(), file=sys.stderr)
+            return 1
+
+    write_review_and_msg(repo_root, record, message)
 
     _print_staged_and_specs(ctx)
-
-    if getattr(args, 'message', None):
-        print("[spec-vc] commit message 已写入 .git/spec-vc-commit-msg", file=sys.stderr)
-    if anchor_str is not None:
-        print(f"audit-anchor: {anchor_str}")
+    print(f"audit-anchor: {record.anchor}")
+    print(
+        f"[spec-vc] review.json 已写入 .git/spec-vc-review.json "
+        f"(mode={mode}, verified={verified})",
+        file=sys.stderr,
+    )
+    print("[spec-vc] commit-msg 已写入 .git/spec-vc-commit-msg", file=sys.stderr)
+    if mode == "subagent":
         print(
-            f"[spec-vc] audit anchor 已写入 .git/spec-vc-audit-anchor: {anchor_str}",
+            "[spec-vc] subagent 模式：可启动 audit subagent 做代码审查（可选），"
+            "完成后 spec-vc commit 或 git commit 即可。",
             file=sys.stderr,
         )
+    else:
         print(
-            "[spec-vc] 启动 audit subagent 时，请在其 description 中复述该 anchor，"
-            "否则 commit-msg hook 将阻塞提交（ADR-017）",
+            "[spec-vc] simple 模式：审查结论已落入 review.json，可直接 spec-vc commit。",
             file=sys.stderr,
         )
-    print("[spec-vc] 请完成 subagent 审计后直接 git commit。commit-msg hook 会自动校验：", file=sys.stderr)
-    print("  1. subagent session log 非空且时间戳新鲜（PostToolUse hook 自动记录 Agent 工具调用，要求审计在 commit-msg 写入之后）", file=sys.stderr)
-    print("  2. ADR 引用合法（[ADR-NNN] 或符合豁免规则的 [ADR-none]）", file=sys.stderr)
-    print("  3. [ADR-NNN 时] plan stage ≥ implement-ready", file=sys.stderr)
-    print("  4. [ADR-NNN 时] Spec 完整（dev-doc 已填写、形式化文件非骨架）", file=sys.stderr)
-    print("  5. [ADR-NNN 时] session log 末行 description 含 audit-anchor（ADR-017）", file=sys.stderr)
-    print("详细流程请查看 SKILL.md", file=sys.stderr)
-
+    print("[spec-vc] 详细流程请查看 SKILL.md", file=sys.stderr)
     return 0
 
 
+def cmd_commit_prepare(args: argparse.Namespace) -> int:
+    """ADR-018 deprecation alias: spec-vc commit prepare → spec-vc review --mode subagent。"""
+    print(
+        "[spec-vc] DEPRECATION: 'spec-vc commit prepare' 已弃用，"
+        "请改用 'spec-vc review --mode subagent --message ...' (ADR-018)。",
+        file=sys.stderr,
+    )
+    args.mode = "subagent"
+    if not hasattr(args, "note"):
+        args.note = ""
+    if not hasattr(args, "verified"):
+        args.verified = False
+    return cmd_review(args)
+
+
 def cmd_commit(args: argparse.Namespace) -> int:
-    if args.subcommand == "prepare":
+    """ADR-018: spec-vc commit —— 薄包装提交入口。
+
+    职责: 防御性 Spec 就绪检查 → 应用 .git/spec-vc-commit-msg → 调 git commit。
+    审计证据校验由 commit-msg hook 在 git commit 时完成（读 review.json）。
+    """
+    if getattr(args, "subcommand", None) == "prepare":
         return cmd_commit_prepare(args)
 
-    print("[spec-vc] 请指定子命令: prepare", file=sys.stderr)
-    return 1
+    repo_root = _repo_root()
+    msg_path = repo_root / ".git" / COMMIT_MSG_FILENAME
+
+    if not msg_path.exists():
+        err = BlockingError(
+            reason="未找到 .git/spec-vc-commit-msg，无法走 spec-vc commit",
+            current_state=f"expected: {msg_path}\nactual: 不存在",
+            fix_commands=[
+                'spec-vc review --mode subagent --message "<完整 commit message>"',
+                "或直接 git commit（自定义 commit message，仍受 commit-msg hook 校验）",
+            ],
+            docs_ref=["SKILL.md#6-commit", "ADR-018"],
+        )
+        print(err.format(), file=sys.stderr)
+        return 1
+
+    config = load_config(repo_root)
+    ctx = gather_commit_context(repo_root, config)
+    if ctx.spec_readiness_issues:
+        _print_spec_readiness_issues(ctx.spec_readiness_issues)
+        return 1
+
+    import subprocess
+    result = subprocess.run(
+        ["git", "commit", "-F", str(msg_path)],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    if result.returncode != 0:
+        print(
+            f"[spec-vc] git commit 被阻塞 (exit {result.returncode})。"
+            f"按上方提示修复后重新 spec-vc commit 或 git commit。",
+            file=sys.stderr,
+        )
+    return result.returncode
 
 
 def cmd_spec_new(args: argparse.Namespace) -> int:
@@ -857,6 +980,13 @@ def build_parser() -> argparse.ArgumentParser:
     commit_prepare.add_argument("--format", choices=["json", "text"], default="json")
     commit_prepare.set_defaults(func=cmd_commit)
     commit.set_defaults(func=cmd_commit)
+
+    review = sub.add_parser("review", help="ADR-018: 独立审查命令")
+    review.add_argument("--message", required=True, help="完整 commit message（含 [ADR-NNN] 或 [ADR-none]）")
+    review.add_argument("--mode", choices=["subagent", "simple"], default="subagent")
+    review.add_argument("--note", default="", help="审查结论；simple 模式必填且必须含 anchor 子串")
+    review.add_argument("--verified", action="store_true", help="标记用户已实际跑过代码验证使用")
+    review.set_defaults(func=cmd_review)
 
     skill = sub.add_parser("skill")
     skill_sub = skill.add_subparsers(dest="skill_command")

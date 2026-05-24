@@ -1,0 +1,175 @@
+```yaml
+openapi: "3.0.3"
+info:
+  title: spec-vc review/commit 解耦 + 结构化错误输出（ADR-018）
+  version: "0.1.0"
+  description: |
+    本 Spec 描述的接口不对外暴露 HTTP，全部以 CLI 命令、git hook、配置文件、stdout/stderr 文本与
+    退出码组合表达。/internal/* 路径仅用于在 OpenAPI 语法下结构化描述这些命令与 hook 的契约。
+
+paths:
+  /internal/review:
+    post:
+      summary: spec-vc review —— 独立审查命令，写 review.json 与 commit-msg
+      description: |
+        参数（argparse）:
+          --message MESSAGE     完整 commit message（必填，含 [ADR-NNN] 或 [ADR-none]）
+          --mode {subagent|simple}  审查模式，默认 subagent
+          --note NOTE           simple 模式下必填；subagent 模式可选
+          --verified            标记"用户已实际验证使用"，写入 review.json.verified=true
+
+        行为:
+          1. 检查 staged changes 非空；为空 → 阻塞 + BlockingError
+          2. 从 --message subject 提取 ADR token（[ADR-NNN] / [ADR-none] / [ADR-???]）
+             - [ADR-???] 未填充 → 阻塞 + BlockingError 提示 sed 替换命令
+          3. Spec 就绪检查：若 ADR-NNN 关联 Spec 未就绪 → 阻塞 + BlockingError 列出缺失项 + fix 命令
+          4. [ADR-NNN] 分支：plan stage 检查（按 adr_id 路由）
+             - 不存在 plan 或 stage < implement-ready → 阻塞 + BlockingError
+             - 已 close（无 plan 文件）→ 放行（追加提交场景）
+          5. 计算 anchor = "<adr_token>@<sha12>"，sha12 = sha256(git diff --cached --no-renames --no-color)[:12]
+          6. 按 mode 处理：
+             - subagent: 不要求 --note；review.json.subagent_log_tail = "(待 PostToolUse 写入)" 占位
+             - simple: 校验 --note 文本含 anchor 子串；不含 → 阻塞 + BlockingError 输出当前 anchor + 含 anchor 的 --note 模板
+          7. 写 .git/spec-vc-review.json
+          8. 写 .git/spec-vc-commit-msg（commit message 文本）
+          9. stdout 输出 "audit-anchor: <anchor>" 与下一步指引（subagent 模式提示启动 audit subagent；simple 模式提示直接 spec-vc commit）
+
+        退出码:
+          0 = 已写 review.json + commit-msg，可进入 commit
+          非 0 = BlockingError 输出至 stderr
+
+      responses:
+        "0":
+          description: review 记录已落盘
+        "1":
+          description: 阻塞（BlockingError）
+
+  /internal/commit:
+    post:
+      summary: spec-vc commit —— 薄包装提交入口
+      description: |
+        参数:
+          （无；如需 amend / --no-verify 等，AI 直接用 git commit）
+
+        行为:
+          1. 检查 .git/spec-vc-commit-msg 存在；不存在 → 阻塞 + BlockingError 提示先跑 spec-vc review
+          2. Spec 就绪检查（防御性二次检查）
+          3. 调用 git commit -F .git/spec-vc-commit-msg
+             - hook 失败 → 捕获 stderr，包装为 BlockingError 转译输出
+             - 成功 → exit 0
+          注意：commit 不再做 anchor 计算、不再做 audit 校验，这些已在 review 阶段完成；
+          commit-msg hook 在 git commit 时独立校验 review.json 与其他规则。
+
+        退出码:
+          0 = git commit 成功
+          非 0 = BlockingError（git commit 被 hook 阻塞或环境问题）
+
+      responses:
+        "0":
+          description: 提交成功
+        "1":
+          description: 阻塞或 git 错误
+
+  /internal/commit-prepare-alias:
+    post:
+      summary: spec-vc commit prepare —— 保留为 review 的别名（deprecation 期）
+      description: |
+        在 deprecation 期保留 commit prepare 命令，行为等价于 `spec-vc review --mode subagent --message ...`。
+        stderr 打印 deprecation warning：
+          "[spec-vc] DEPRECATION: 'spec-vc commit prepare' 将在 ADR-XXX 后移除，请改用 'spec-vc review --mode subagent --message ...'"
+        退出码与 review 一致。
+      responses:
+        "0":
+          description: 行为同 review
+
+  /internal/commit-msg-hook:
+    post:
+      summary: commit-msg hook —— 校验链入口（重构）
+      description: |
+        Claude Code git hook 触发；commit message 文件路径作为 $1 传入。
+        校验链顺序（任一阻塞即返回非 0）:
+
+        1. SPEC_VC_BYPASS 环境变量非空 → 写 .git/spec-vc-bypass.log → 跳到第 2 步（仍校验 ADR 引用格式）
+        2. ADR 引用格式校验:
+           - 无 [ADR-NNN] / [ADR-none] → BlockingError 阻塞
+           - [ADR-???] 未填充 → BlockingError 阻塞 + 提示 sed 命令
+           - [ADR-none] → 跳到第 5 步（量化判定）
+           - [ADR-NNN] → 继续第 3 步
+        3. [ADR-NNN] plan stage 检查（按 adr_id 路由）:
+           - active 匹配 → 用 active.stage
+           - 不匹配 → fallback 取 plans/ADR-{adr_id}-plan-*.md 编号最大
+           - stage < implement-ready → BlockingError 阻塞
+           - 无 plan 文件 → 放行（已 close 追加提交场景）
+        4. [ADR-NNN] 校验链（SPEC_VC_BYPASS 非空则跳过本步全部子项）:
+           a. Spec 完整性: ADR 关联 Spec 的 dev-doc 与形式化文件就绪 → 否则 BlockingError
+           b. 读 .git/spec-vc-review.json:
+              - 文件不存在 → BlockingError 阻塞 + fix=spec-vc review ...
+              - JSON 解析失败 → BlockingError 阻塞
+              - review.json.anchor != "ADR-NNN@<当前 staged sha12>" → BlockingError 阻塞输出 expected/actual
+              - review.json.mtime ≤ .git/spec-vc-commit-msg 的 mtime → BlockingError（证据不新鲜）
+              - mode==simple 且 review.json.note 不含 anchor 子串 → BlockingError 阻塞
+              - require_user_verified 配置为 true 且 review.json.verified != true → BlockingError 阻塞
+           c. 全过 → 放行
+        5. [ADR-none] 路径（SPEC_VC_BYPASS 非空则跳过本步）:
+           - 调用 lightweight detection
+           - 命中 → 放行
+           - 未命中 → BlockingError 阻塞，输出未命中规则与"升级 ADR 或解释豁免理由"指引
+
+        全部通过 → exit 0；任一阻塞 → BlockingError 写 stderr + exit 1。
+
+      responses:
+        "0":
+          description: 校验通过
+        "1":
+          description: 校验阻塞，BlockingError 已写 stderr
+
+  /internal/lightweight-detect:
+    get:
+      summary: [ADR-none] 量化判定
+      description: |
+        输入: repo_root, LightweightConfig
+        输出: (is_lightweight: bool, reasons: list[str])
+
+        规则（全部命中才 True）:
+          - len(staged_files) <= config.files_max（默认 5）
+          - 所有 staged_files 路径 全部命中 config.type_whitelist 模式（默认: *.md, *.txt, doc/**, .gitignore, .editorconfig, *.json）
+          - sum(|added| + |deleted|) <= config.lines_max（默认 50）
+
+        任一条件不满足 → False，reasons 列出未命中规则与实际数值，供 BlockingError 引用。
+
+      responses:
+        "200":
+          description: 已完成判定
+
+  /internal/blocking-error/format:
+    post:
+      summary: BlockingError 输出格式
+      description: |
+        所有 hook 阻塞与 CLI 错误统一通过本结构输出到 stderr：
+
+          [spec-vc] BLOCKED: <reason>
+
+          Current state:
+            <current_state 多行文本>
+
+          How to fix:
+            $ <fix_command_1>
+            $ <fix_command_2>
+            ...
+
+          Docs:
+            - <docs_ref_1>
+            - <docs_ref_2>
+
+        字段约束：
+          reason: 一行可读的阻塞原因（不超过 80 字符建议）
+          current_state: 多行事实摘要，必须含相关文件存在性、mtime、anchor 实际值等"可观察事实"
+          fix_commands: 至少一条可粘贴执行的 shell 命令
+          docs_ref: 至少一条文档锚点（SKILL.md 章节 / ADR 编号 / Spec 编号）
+
+      responses:
+        "0":
+          description: 已格式化
+```
+
+---

@@ -272,10 +272,9 @@ def test_commit_passes_with_ready_specs(tmp_path: Path):
     (base / "dev-doc.md").write_text(doc)
     run(repo, "spec", "formalize", "000", "--type", "all")
 
-    proc = run(repo, "commit", "prepare")
+    proc = run(repo, "commit", "prepare", "--message", "feat: x [ADR-000]")
     assert proc.returncode == 0
     assert "Spec-000" in proc.stderr
-    # ADR-010: stdout no longer contains manifest JSON
 
 
 def test_adr_show_displays_content(tmp_path: Path):

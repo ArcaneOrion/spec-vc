@@ -176,16 +176,47 @@ def test_commit_msg_block_messages_reference_skill_md(tmp_path: Path):
     assert "SKILL.md" in proc.stderr
 
 
-def _write_subagent_session(repo: Path, anchor: str = "ADR-000@aaaaaaaaaaaa"):
-    """写入 subagent session log（ADR-017: 默认含 anchor + 同步写 anchor 文件）。"""
+def _write_subagent_session(repo: Path, anchor: str | None = None, adr_id: str = "000", mode: str = "subagent", verified: bool = False, note: str = ""):
+    """ADR-018: 升级到写 review.json，同时兼容性写 session log + anchor file。
+
+    旧测试默认 adr_id='000'，会基于当前 staged 内容动态计算真实 anchor。
+    显式传 anchor 参数则覆盖（用于测试 anchor 不匹配 / 历史 anchor 等场景）。
+    """
+    import datetime
+    import json
+    from spec_vc.commit import compute_audit_anchor
+
+    if anchor is None:
+        adr_token = f"ADR-{adr_id}"
+        anchor = compute_audit_anchor(repo, adr_token)
+    else:
+        adr_token = anchor.split("@", 1)[0]
+
+    timestamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
-    log_path.write_text(f"2026-05-03T17:00:00+08:00 | Agent | audit subagent {anchor}\n")
-    anchor_path = repo / ".git" / "spec-vc-audit-anchor"
-    anchor_path.write_text(anchor)
+    log_path.write_text(f"{timestamp} | Agent | audit subagent {anchor}\n")
+
+    review_path = repo / ".git" / "spec-vc-review.json"
+    sha12_part = anchor.split("@", 1)[1] if "@" in anchor else ""
+    record = {
+        "anchor": anchor,
+        "adr_token": adr_token,
+        "staged_sha12": sha12_part,
+        "mode": mode,
+        "verified": verified,
+        "note": note,
+        "subagent_log_tail": None,
+        "created_at": timestamp,
+    }
+    review_path.write_text(json.dumps(record, ensure_ascii=False, indent=2))
+
+    anchor_legacy_path = repo / ".git" / "spec-vc-audit-anchor"
+    anchor_legacy_path.write_text(anchor)
+    return anchor
 
 
 def test_commit_msg_blocks_without_subagent_session(tmp_path: Path):
-    """无 subagent session 记录时 [ADR-NNN] hook 阻塞。"""
+    """ADR-018: 无 review.json 时 [ADR-NNN] hook 阻塞。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
@@ -193,22 +224,28 @@ def test_commit_msg_blocks_without_subagent_session(tmp_path: Path):
     msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0
-    assert "未找到 subagent 审计记录" in proc.stderr
-    assert "SKILL.md" in proc.stderr
+    assert "review.json" in proc.stderr
+    assert "BLOCKED" in proc.stderr
+    assert "How to fix:" in proc.stderr
+    assert "spec-vc review" in proc.stderr
+    assert "ADR-018" in proc.stderr or "SKILL.md" in proc.stderr
 
 
 def test_commit_msg_rejects_adr_none_for_code_change(tmp_path: Path):
+    """ADR-018: [ADR-none] + 代码文件未命中 type_whitelist → 量化判定阻塞 + BlockingError。"""
     repo = init_repo(tmp_path)
     src = repo / "src"
     src.mkdir()
     (src / "main.py").write_text("print('x')\n")
     subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
-    _write_subagent_session(repo)
     msg = repo / "msg.txt"
     msg.write_text("feat: x [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0
-    assert "不符合豁免规则" in proc.stderr
+    assert "未命中量化轻量规则" in proc.stderr
+    assert "unmatched_files" in proc.stderr
+    assert "src/main.py" in proc.stderr
+    assert "ADR-018" in proc.stderr
 
 
 def test_commit_msg_allows_adr_none_for_docs_change(tmp_path: Path):
@@ -261,7 +298,7 @@ def test_commit_msg_bypass_env_skips_token_check(tmp_path: Path):
 
 
 def test_commit_msg_bypass_empty_string_falls_back_to_session_check(tmp_path: Path):
-    """ADR-011: SPEC_VC_BYPASS 空字符串视为未触发，[ADR-NNN] 走 subagent session 校验。"""
+    """ADR-018: SPEC_VC_BYPASS 空字符串视为未触发，[ADR-NNN] 仍走 review.json 校验。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
@@ -272,8 +309,8 @@ def test_commit_msg_bypass_empty_string_falls_back_to_session_check(tmp_path: Pa
         extra_env={"SPEC_VC_BYPASS": ""},
     )
     assert proc.returncode != 0, "空字符串不应触发 bypass"
-    assert "未找到 subagent 审计记录" in proc.stderr
-    assert "SPEC_VC_BYPASS" in proc.stderr
+    assert "review.json" in proc.stderr
+    assert "BLOCKED" in proc.stderr
 
 
 def test_commit_msg_bypass_log_failure_is_fail_open(tmp_path: Path):
@@ -610,56 +647,53 @@ def _touch_commit_msg(repo: Path, content: str = "feat: x [ADR-none]\n") -> Path
     return msg_path
 
 
-def test_freshness_passes_when_log_newer_than_commit_msg(tmp_path: Path):
-    """ADR-013: session log 末行时间戳 > commit-msg mtime → [ADR-NNN] 放行。"""
-    import datetime
+def test_freshness_passes_when_review_newer_than_commit_msg(tmp_path: Path):
+    """ADR-018: review.json mtime > commit-msg mtime → [ADR-NNN] 放行。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     _touch_commit_msg(repo)
-    # ADR-017: [ADR-NNN] 需要 anchor 文件 + description 含 anchor
-    anchor = "ADR-000@aaaaaaaaaaaa"
-    _write_anchor_file(repo, anchor)
-    # 用未来时间确保 > commit-msg mtime
-    future = (datetime.datetime.now().astimezone() + datetime.timedelta(seconds=120)).isoformat(timespec="seconds")
-    _write_session_log_with_ts(repo, future, f"fresh audit {anchor}")
+    _write_subagent_session(repo, adr_id="000")
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode == 0, f"新鲜审计应放行, stderr={proc.stderr}"
+    assert proc.returncode == 0, f"新鲜 review 应放行, stderr={proc.stderr}"
 
 
-def test_freshness_blocks_when_log_older_than_commit_msg(tmp_path: Path):
-    """ADR-013: session log 末行早于 commit-msg mtime → [ADR-NNN] 阻塞，含 SKILL.md 引用。"""
+def test_freshness_blocks_when_review_older_than_commit_msg(tmp_path: Path):
+    """ADR-018: review.json mtime <= commit-msg mtime → [ADR-NNN] 阻塞 BlockingError。"""
+    import os
+    import time
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    # 先写 stale log，再 touch commit-msg → commit-msg mtime > log 末行
-    _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", "stale audit")
+    _write_subagent_session(repo, adr_id="000")
+    time.sleep(0.01)
     _touch_commit_msg(repo)
+    # 把 commit-msg mtime 强行设为 review.json mtime 之后
+    rv = repo / ".git" / "spec-vc-review.json"
+    msg_path = repo / ".git" / "spec-vc-commit-msg"
+    new_ts = rv.stat().st_mtime + 5.0
+    os.utime(msg_path, (new_ts, new_ts))
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode != 0, "陈旧审计应阻塞"
-    assert "审计" in proc.stderr or "freshness" in proc.stderr.lower() or "新" in proc.stderr
-    assert "SKILL.md" in proc.stderr
+    assert proc.returncode != 0, "陈旧 review 应阻塞"
+    assert "不新鲜" in proc.stderr
+    assert "BLOCKED" in proc.stderr
 
 
 def test_freshness_skips_when_no_commit_msg(tmp_path: Path):
-    """ADR-013: 用户未走 prepare 直接 commit（无 commit-msg 文件）→ [ADR-NNN] 跳过 freshness 检查。"""
+    """ADR-018: 无 commit-msg 文件时跳过 mtime 新鲜度检查。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    # ADR-017: [ADR-NNN] 需要 anchor 文件 + description 含 anchor（即使 freshness 跳过）
-    anchor = "ADR-000@aaaaaaaaaaaa"
-    _write_anchor_file(repo, anchor)
-    # 写陈旧 log 但不 touch commit-msg
-    _write_session_log_with_ts(repo, "2020-01-01T00:00:00+08:00", f"stale audit {anchor}")
+    _write_subagent_session(repo, adr_id="000")
     assert not (repo / ".git" / "spec-vc-commit-msg").exists()
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode == 0, f"无 commit-msg 时应跳过 freshness, stderr={proc.stderr}"
+    assert proc.returncode == 0, f"无 commit-msg 时应跳过 mtime 检查, stderr={proc.stderr}"
 
 
 def test_bypass_skips_freshness_check(tmp_path: Path):
@@ -692,12 +726,7 @@ def test_adr_none_skips_session_freshness_check(tmp_path: Path):
     assert proc.returncode == 0, f"[ADR-none] 应跳过 session 检查, stderr={proc.stderr}"
 
 
-# ─── ADR-017: audit anchor 内容绑定 ──────────────────────────────────────────
-
-def _write_anchor_file(repo: Path, content: str) -> Path:
-    anchor_path = repo / ".git" / "spec-vc-audit-anchor"
-    anchor_path.write_text(content)
-    return anchor_path
+# ─── ADR-018: review.json 与新 hook 校验链 ──────────────────────────────────
 
 
 def test_compute_audit_anchor_stable_for_same_staged(tmp_path: Path):
@@ -738,18 +767,21 @@ def test_compute_audit_anchor_format_adr_none(tmp_path: Path):
 
 
 def test_commit_prepare_writes_audit_anchor_file(tmp_path: Path):
-    """ADR-017: spec-vc commit prepare --message 后 .git/spec-vc-audit-anchor 存在且格式正确。"""
+    """ADR-018: spec-vc commit prepare (deprecation alias) 写 review.json + anchor 格式正确。"""
+    import json as _json
     import re
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     proc = run(repo, "commit", "prepare", "--message", "docs: update [ADR-000]")
     assert proc.returncode == 0, proc.stderr
-    anchor_path = repo / ".git" / "spec-vc-audit-anchor"
-    assert anchor_path.exists()
-    content = anchor_path.read_text().strip()
-    assert re.match(r"^ADR-000@[0-9a-f]{12}$", content)
-    assert f"audit-anchor: {content}" in proc.stdout
+    review_path = repo / ".git" / "spec-vc-review.json"
+    assert review_path.exists()
+    record = _json.loads(review_path.read_text())
+    assert re.match(r"^ADR-000@[0-9a-f]{12}$", record["anchor"])
+    assert record["mode"] == "subagent"
+    assert f"audit-anchor: {record['anchor']}" in proc.stdout
+    assert "DEPRECATION" in proc.stderr
 
 
 def test_post_tool_use_hook_skips_post_tool_use_failure(tmp_path: Path):
@@ -782,73 +814,62 @@ def test_post_tool_use_hook_writes_for_normal_post_tool_use_event(tmp_path: Path
     assert "ADR-017@a3f7c891b2d4" in log_path.read_text()
 
 
-def test_anchor_binding_passes_when_desc_contains_anchor(tmp_path: Path):
-    """ADR-017: session log 末行 description 含 anchor → 放行。"""
-    import datetime
+def test_anchor_binding_passes_when_review_anchor_matches(tmp_path: Path):
+    """ADR-018: review.json.anchor 匹配当前 staged sha12 → 放行。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    anchor = "ADR-000@a3f7c891b2d4"
-    _write_anchor_file(repo, anchor)
-    _touch_commit_msg(repo)
-    future = (datetime.datetime.now().astimezone() + datetime.timedelta(seconds=120)).isoformat(timespec="seconds")
-    _write_session_log_with_ts(repo, future, f"audit {anchor} ADR-000")
+    _write_subagent_session(repo, adr_id="000")
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode == 0, f"含 anchor 应放行, stderr={proc.stderr}"
+    assert proc.returncode == 0, f"匹配 anchor 应放行, stderr={proc.stderr}"
 
 
-def test_anchor_binding_blocks_when_desc_missing_anchor(tmp_path: Path):
-    """ADR-017: session log 末行 description 不含 anchor → 阻塞 + stderr 含当前 anchor。"""
-    import datetime
+def test_anchor_binding_blocks_when_anchor_mismatch(tmp_path: Path):
+    """ADR-018: review.json.anchor 与当前 staged sha12 不匹配 → 阻塞 + expected/actual。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    anchor = "ADR-000@a3f7c891b2d4"
-    _write_anchor_file(repo, anchor)
-    _touch_commit_msg(repo)
-    future = (datetime.datetime.now().astimezone() + datetime.timedelta(seconds=120)).isoformat(timespec="seconds")
-    _write_session_log_with_ts(repo, future, "audit something else (no anchor)")
+    fake_anchor = "ADR-000@deadbeefcafe"
+    _write_subagent_session(repo, anchor=fake_anchor)
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode != 0, "缺 anchor 子串应阻塞"
-    assert anchor in proc.stderr, f"stderr 应含当前 anchor: {proc.stderr}"
-    assert "SKILL.md" in proc.stderr
+    assert proc.returncode != 0, "anchor 不匹配应阻塞"
+    assert "不匹配" in proc.stderr
+    assert "expected:" in proc.stderr
+    assert "actual:" in proc.stderr
+    assert fake_anchor in proc.stderr
 
 
-def test_anchor_binding_blocks_when_anchor_file_missing_with_adr_nnn(tmp_path: Path):
-    """ADR-017: [ADR-NNN] + anchor 文件不存在 → 阻塞 + 提示走 prepare。"""
-    import datetime
+def test_anchor_binding_blocks_when_review_missing_with_adr_nnn(tmp_path: Path):
+    """ADR-018: [ADR-NNN] + review.json 不存在 → 阻塞 + 提示 spec-vc review 命令。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    _touch_commit_msg(repo)
-    future = (datetime.datetime.now().astimezone() + datetime.timedelta(seconds=120)).isoformat(timespec="seconds")
-    _write_session_log_with_ts(repo, future, "audit blah")
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-000]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
     assert proc.returncode != 0
-    assert "prepare" in proc.stderr
-    assert "spec-vc-audit-anchor" in proc.stderr
+    assert "review.json" in proc.stderr
+    assert "spec-vc review" in proc.stderr
 
 
 def test_anchor_binding_skipped_for_adr_none(tmp_path: Path):
-    """ADR-017: [ADR-none] 即使 anchor 文件不存在也放行（豁免规则已量化卡控）。"""
+    """ADR-018: [ADR-none] 不检查 review.json（走量化判定）。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    assert not (repo / ".git" / "spec-vc-audit-anchor").exists()
+    assert not (repo / ".git" / "spec-vc-review.json").exists()
     msg = repo / "msg.txt"
     msg.write_text("docs: update [ADR-none]\n")
     proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode == 0, f"[ADR-none] 应跳过 anchor 检查, stderr={proc.stderr}"
+    assert proc.returncode == 0, f"[ADR-none] 应跳过 review 检查, stderr={proc.stderr}"
 
 
 def test_bypass_skips_anchor_binding(tmp_path: Path):
-    """ADR-017: SPEC_VC_BYPASS 旁路 anchor 检查（与既有 BYPASS 语义一致）。"""
+    """ADR-018: SPEC_VC_BYPASS 旁路 review.json 检查。"""
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc\n")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
@@ -858,7 +879,7 @@ def test_bypass_skips_anchor_binding(tmp_path: Path):
         repo, "hook", "commit-msg", str(msg),
         extra_env={"SPEC_VC_BYPASS": "emergency"},
     )
-    assert proc.returncode == 0, f"BYPASS 应旁路 anchor 检查, stderr={proc.stderr}"
+    assert proc.returncode == 0, f"BYPASS 应旁路 review 检查, stderr={proc.stderr}"
 
 
 def test_load_stage_for_adr_uses_active_when_match(tmp_path: Path):
@@ -935,3 +956,183 @@ def test_load_stage_for_adr_picks_largest_plan_id(tmp_path: Path):
         sys.path.pop(0)
     adr_dir = repo / "doc" / "arch"
     assert _load_stage_for_adr(adr_dir, "001") == "plan"
+
+
+# ─── ADR-018: 量化判定单元测试 ─────────────────────────────────────────────
+
+
+def test_lightweight_passes_for_docs_only_under_limits(tmp_path: Path):
+    """ADR-018: 文档改动 + 文件数/行数都在阈值内 → 命中量化轻量。"""
+    from spec_vc.config import LightweightConfig
+    from spec_vc.lightweight import detect_lightweight_change
+
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("hello\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    cfg = LightweightConfig()
+    result = detect_lightweight_change(repo, cfg)
+    assert result.is_lightweight is True
+    assert result.reasons == []
+
+
+def test_lightweight_blocks_when_files_exceed_max(tmp_path: Path):
+    """ADR-018: 文件数 > files_max → 未命中量化。"""
+    from spec_vc.config import LightweightConfig
+    from spec_vc.lightweight import detect_lightweight_change
+
+    repo = init_repo(tmp_path)
+    for i in range(6):
+        (repo / f"doc{i}.md").write_text("x\n")
+        subprocess.run(["git", "add", f"doc{i}.md"], cwd=repo, check=True)
+    cfg = LightweightConfig(files_max=5)
+    result = detect_lightweight_change(repo, cfg)
+    assert result.is_lightweight is False
+    assert any("files_count" in r for r in result.reasons)
+    assert result.metrics.files_count == 6
+
+
+def test_lightweight_blocks_when_lines_exceed_max(tmp_path: Path):
+    """ADR-018: 净变更行数 > lines_max → 未命中。"""
+    from spec_vc.config import LightweightConfig
+    from spec_vc.lightweight import detect_lightweight_change
+
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("\n".join(["line"] * 100) + "\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    cfg = LightweightConfig(lines_max=50)
+    result = detect_lightweight_change(repo, cfg)
+    assert result.is_lightweight is False
+    assert any("lines_delta" in r for r in result.reasons)
+
+
+def test_lightweight_blocks_when_unmatched_file_type(tmp_path: Path):
+    """ADR-018: 含未命中 type_whitelist 的文件 → 未命中。"""
+    from spec_vc.config import LightweightConfig
+    from spec_vc.lightweight import detect_lightweight_change
+
+    repo = init_repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "src" / "main.py").write_text("x\n")
+    subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
+    cfg = LightweightConfig()
+    result = detect_lightweight_change(repo, cfg)
+    assert result.is_lightweight is False
+    assert "src/main.py" in result.metrics.unmatched_files
+
+
+def test_lightweight_passes_doc_glob_pattern(tmp_path: Path):
+    """ADR-018: doc/** 这种 glob 前缀模式应被识别。"""
+    from spec_vc.config import LightweightConfig
+    from spec_vc.lightweight import detect_lightweight_change
+
+    repo = init_repo(tmp_path)
+    (repo / "doc" / "arch" / "extra.md").write_text("x\n")
+    subprocess.run(["git", "add", "doc/arch/extra.md"], cwd=repo, check=True)
+    cfg = LightweightConfig()
+    result = detect_lightweight_change(repo, cfg)
+    assert result.is_lightweight is True, f"reasons: {result.reasons}"
+
+
+# ─── ADR-018: simple 模式 ──────────────────────────────────────────────────
+
+
+def test_review_simple_mode_requires_note(tmp_path: Path):
+    """ADR-018: simple 模式无 --note → 阻塞 + BlockingError 含 anchor。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    proc = run(repo, "review", "--mode", "simple", "--message", "docs: x [ADR-000]")
+    assert proc.returncode != 0
+    assert "simple 模式必须提供 --note" in proc.stderr
+    assert "BLOCKED" in proc.stderr
+
+
+def test_review_simple_mode_note_must_contain_anchor(tmp_path: Path):
+    """ADR-018: simple 模式 --note 不含 anchor → 阻塞 + BlockingError 含期望 anchor。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    proc = run(repo, "review", "--mode", "simple", "--message", "docs: x [ADR-000]", "--note", "no anchor here")
+    assert proc.returncode != 0
+    assert "不含 anchor" in proc.stderr
+    assert "ADR-000@" in proc.stderr
+
+
+def test_review_simple_mode_with_anchor_in_note_passes(tmp_path: Path):
+    """ADR-018: simple 模式 --note 含 anchor → 成功 + review.json 含 simple mode。"""
+    import json as _json
+    from spec_vc.commit import compute_audit_anchor
+
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    anchor = compute_audit_anchor(repo, "ADR-000")
+    note = f"已读 staged diff 指纹 {anchor}，结论：无问题"
+    proc = run(repo, "review", "--mode", "simple", "--message", "docs: x [ADR-000]", "--note", note)
+    assert proc.returncode == 0, proc.stderr
+    record = _json.loads((repo / ".git" / "spec-vc-review.json").read_text())
+    assert record["mode"] == "simple"
+    assert anchor in record["note"]
+
+
+def test_review_verified_flag_written(tmp_path: Path):
+    """ADR-018: --verified 写入 review.json.verified=true。"""
+    import json as _json
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    proc = run(repo, "review", "--message", "docs: x [ADR-000]", "--verified")
+    assert proc.returncode == 0
+    record = _json.loads((repo / ".git" / "spec-vc-review.json").read_text())
+    assert record["verified"] is True
+
+
+# ─── ADR-018: BlockingError 结构 + require_user_verified 升级开关 ─────────
+
+
+def test_blocking_error_output_contains_four_sections(tmp_path: Path):
+    """ADR-018: hook 阻塞 stderr 必须含 reason / current_state / fix_commands / docs_ref 四段。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0
+    assert "BLOCKED:" in proc.stderr
+    assert "Current state:" in proc.stderr
+    assert "How to fix:" in proc.stderr
+    assert "Docs:" in proc.stderr
+    # fix_commands 至少一条以 "$" 前缀
+    assert "$ " in proc.stderr
+
+
+def test_require_user_verified_blocks_when_verified_false(tmp_path: Path):
+    """ADR-018: .spec-vc.toml 配置 require_user_verified=true 时，verified=false 阻塞。"""
+    repo = init_repo(tmp_path)
+    config_path = repo / ".spec-vc.toml"
+    config_path.write_text(config_path.read_text() + "\n[lightweight]\nrequire_user_verified = true\n")
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    _write_subagent_session(repo, adr_id="000")  # 默认 verified=False
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+    assert proc.returncode != 0
+    assert "user_verified" in proc.stderr or "verified" in proc.stderr
+    assert "--verified" in proc.stderr
+
+
+def test_post_tool_use_still_writes_session_log(tmp_path: Path):
+    """ADR-018: PostToolUse hook 仍写 session log（保留为辅助日志，commit-msg hook 不再读）。"""
+    repo = init_repo(tmp_path)
+    payload = json.dumps({
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Agent",
+        "tool_input": {"description": "test audit"},
+    })
+    proc = run(repo, "hook", "post-tool-use", stdin=payload)
+    assert proc.returncode == 0
+    log_path = repo / ".git" / "spec-vc-subagent-sessions.log"
+    assert log_path.exists()
+    assert "test audit" in log_path.read_text()

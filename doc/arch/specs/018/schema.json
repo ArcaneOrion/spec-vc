@@ -1,0 +1,171 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ReviewRecord": {
+      "title": "ReviewRecord",
+      "description": ".git/spec-vc-review.json 文件内容契约。spec-vc review 写入，commit-msg hook 读取校验。",
+      "type": "object",
+      "required": ["anchor", "adr_token", "staged_sha12", "mode", "verified", "created_at"],
+      "properties": {
+        "anchor": {
+          "type": "string",
+          "pattern": "^ADR-(\\d{3,}|none)@[0-9a-f]{12}$",
+          "description": "完整 anchor 字符串：<adr_token>@<staged_sha12>"
+        },
+        "adr_token": {
+          "type": "string",
+          "pattern": "^ADR-(\\d{3,}|none)$"
+        },
+        "staged_sha12": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{12}$",
+          "description": "sha256(git diff --cached --no-renames --no-color)[:12]"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["subagent", "simple"]
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "用户是否标记 --verified（实际跑过代码验证）。默认 false。"
+        },
+        "note": {
+          "type": "string",
+          "description": "审查结论或验证说明。simple 模式必填且必须含 anchor 子串；subagent 模式可选。"
+        },
+        "subagent_log_tail": {
+          "type": ["string", "null"],
+          "description": "subagent 模式下，可选记录 PostToolUse session log 末行作为辅助证据；null 表示未启用辅助绑定。"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 with timezone。写文件时同时设置 mtime；hook 校验 mtime 而非该字段（mtime 不可伪造）。"
+        }
+      },
+      "examples": [
+        {
+          "anchor": "ADR-018@a3f7c891b2d4",
+          "adr_token": "ADR-018",
+          "staged_sha12": "a3f7c891b2d4",
+          "mode": "subagent",
+          "verified": true,
+          "note": "subagent 审计通过，无 P0/P1 问题",
+          "subagent_log_tail": "2026-05-24T12:40:00+08:00 | Agent | audit ADR-018@a3f7c891b2d4 ...",
+          "created_at": "2026-05-24T12:40:05+08:00"
+        },
+        {
+          "anchor": "ADR-018@a3f7c891b2d4",
+          "adr_token": "ADR-018",
+          "staged_sha12": "a3f7c891b2d4",
+          "mode": "simple",
+          "verified": false,
+          "note": "已读 staged diff，anchor ADR-018@a3f7c891b2d4；主要改动是 cli.py 注册命令 + 单测",
+          "subagent_log_tail": null,
+          "created_at": "2026-05-24T12:42:10+08:00"
+        }
+      ]
+    },
+    "LightweightConfig": {
+      "title": "LightweightConfig",
+      "description": ".spec-vc.toml 中 [lightweight] 段；控制 [ADR-none] 量化判定阈值。",
+      "type": "object",
+      "properties": {
+        "files_max": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5
+        },
+        "lines_max": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 50,
+          "description": "净变更行数（增 + 删）上限"
+        },
+        "type_whitelist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["*.md", "*.txt", "doc/**", ".gitignore", ".editorconfig", "*.json"],
+          "description": "glob 模式列表；所有 staged files 路径必须全部命中至少一个模式才视为轻量"
+        },
+        "require_user_verified": {
+          "type": "boolean",
+          "default": false,
+          "description": "升级开关：commit-msg hook 是否要求 review.json.verified=true 才放行"
+        }
+      }
+    },
+    "BlockingError": {
+      "title": "BlockingError",
+      "description": "所有 spec-vc 阻塞输出的统一结构。CLI 与 hook 共用。",
+      "type": "object",
+      "required": ["reason", "current_state", "fix_commands", "docs_ref"],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "一行可读阻塞原因"
+        },
+        "current_state": {
+          "type": "string",
+          "minLength": 1,
+          "description": "多行事实摘要：相关文件存在性、mtime、anchor 实际值等可观察事实"
+        },
+        "fix_commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "至少一条可粘贴执行的 shell 命令"
+        },
+        "docs_ref": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "至少一条文档锚点：SKILL.md 章节 / ADR-XXX / Spec-XXX"
+        }
+      },
+      "examples": [
+        {
+          "reason": "review.json 不存在，commit-msg hook 无法验证审计证据",
+          "current_state": "expected: .git/spec-vc-review.json\nactual: 文件不存在\nstaged sha12: a3f7c891b2d4",
+          "fix_commands": [
+            "spec-vc review --mode subagent --message \"<完整 commit message>\"",
+            "git commit -F .git/spec-vc-commit-msg"
+          ],
+          "docs_ref": ["SKILL.md#6a-review", "ADR-018"]
+        }
+      ]
+    },
+    "LightweightDetectionResult": {
+      "title": "LightweightDetectionResult",
+      "type": "object",
+      "required": ["is_lightweight", "reasons", "metrics"],
+      "properties": {
+        "is_lightweight": { "type": "boolean" },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "未命中规则的人话原因；is_lightweight=true 时为空数组"
+        },
+        "metrics": {
+          "type": "object",
+          "required": ["files_count", "lines_delta", "unmatched_files"],
+          "properties": {
+            "files_count": { "type": "integer", "minimum": 0 },
+            "lines_delta": { "type": "integer", "minimum": 0 },
+            "unmatched_files": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "未命中 type_whitelist 的具体路径"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+---

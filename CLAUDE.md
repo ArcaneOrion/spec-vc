@@ -12,7 +12,8 @@ uv sync
 uv run spec-vc --help                              # 查看帮助
 uv run spec-vc init                                 # 初始化项目（安装 hooks、配置、seed ADR）
 uv run spec-vc skill load --user-prompt "..."       # 加载子系统上下文
-uv run spec-vc commit prepare --message "..."        # AI 域：Spec 检查 + 写入 commit-msg
+uv run spec-vc review --mode subagent --message "..."  # ADR-018: 审查命令（写 review.json + commit-msg）
+uv run spec-vc commit                                # ADR-018: 薄包装提交入口（应用 commit-msg + git commit）
 uv run spec-vc adr new "标题"                        # 创建新 ADR
 uv run spec-vc adr list                              # 列出所有 ADR
 uv run spec-vc spec new "标题" --adr ADR-NNN         # 创建 Spec
@@ -60,14 +61,19 @@ uv run pytest tests/python/ -k "formalize"            # 按关键词筛选
 
 **commit message**: `<type>(<scope>): <subject> [ADR-NNN]`，subject 用中文简述。严格模式(hook)阻塞无 `[ADR-NNN]` 或 `[ADR-none]` 的 commit。
 
-**提交流程**（ADR-011 简化版）：
-- `commit prepare`（AI 域）：Spec 就绪检查 → 写 commit-msg 到 `.git/spec-vc-commit-msg`
-- AI 自由执行 subagent 语义审计，PostToolUse hook 自动记录 Agent 调用到 `.git/spec-vc-subagent-sessions.log`
-- 审计完成后直接 `git commit`，commit-msg hook 自动校验
-- commit-msg hook 校验链：SPEC_VC_BYPASS → subagent session log 非空 → ADR 引用 → [ADR-NNN 时] plan stage ≥ implement-ready + Spec 完整性 → 放行
-- 校验失败则 `git commit` 被阻塞，AI 修改后重新 add+commit 形成自然循环
+**提交流程**（ADR-018 解耦版，supersedes ADR-011）：
+- `spec-vc review --mode subagent|simple --message "..." [--note "..."] [--verified]`：独立审查命令
+  - 计算 anchor=ADR-XXX@<staged-diff-sha12>，写 `.git/spec-vc-review.json` + `.git/spec-vc-commit-msg`
+  - subagent 模式可启动 audit subagent 做代码审查（可选）
+  - simple 模式必须在 `--note` 文本中复述 anchor 子串
+  - `--verified` 标记用户已实际跑过代码验证使用
+- 用户可在审查后跑代码、点 UI、测接口验证使用
+- `spec-vc commit`（薄包装）或直接 `git commit`，commit-msg hook 自动校验
+- commit-msg hook 校验链：SPEC_VC_BYPASS → ADR 引用 → [ADR-NNN] plan stage + Spec + review.json (anchor 匹配 + mtime 新鲜 + simple 注解) → [ADR-none] 量化判定 → 放行
+- 所有阻塞错误统一为 BlockingError 结构（reason / current_state / fix_commands / docs_ref），AI 读 stderr 后可直接按 fix_commands 修复
+- `commit prepare` 保留为 deprecation alias（等价于 `review --mode subagent`），打 warning
 
-**SPEC_VC_BYPASS**: 环境变量逃生口，设 `<原因>` 后 `git commit` 跳过 session+stage+spec 检查，ADR 引用校验不变。bypass 写审计日志到 `.git/spec-vc-bypass.log`。
+**SPEC_VC_BYPASS**: 环境变量逃生口，设 `<原因>` 后 `git commit` 跳过 review.json 校验、量化判定，ADR 引用校验、plan stage、Spec 完整性照常。bypass 写审计日志到 `.git/spec-vc-bypass.log`。
 
 **模板系统**: `templates/` 下存放 ADR/Spec/commit 模板文件，通过 `template_path()` 访问。
 

@@ -7,15 +7,13 @@ import sys
 from pathlib import Path
 import re
 
-from .adr import ensure_referenceable, exemption_allows, parse_adr
-from .commit import (
-    SUBAGENT_SESSIONS_FILENAME,
-    check_session_log_freshness,
-    check_subagent_session,
-)
+from .adr import ensure_referenceable, parse_adr
+from .commit import SUBAGENT_SESSIONS_FILENAME, compute_audit_anchor, COMMIT_MSG_FILENAME
 from .config import Config, load_config
-from .errors import ValidationError
-from .gitops import repo_root_from, staged_diff_numstat, staged_files
+from .errors import BlockingError, ValidationError
+from .gitops import repo_root_from
+from .lightweight import detect_lightweight_change
+from .review import read_review, review_path
 
 
 ADR_TOKEN_RE = re.compile(r"\[(ADR-none|ADR-\?+|ADR-\d{3,})\]")
@@ -120,52 +118,126 @@ def _check_spec_readiness_for_adr(repo_root: Path, config: Config, adr_id: str) 
     raise ValidationError("\n".join(lines))
 
 
-def _check_anchor_binding(repo_root: Path, adr_id: str) -> None:
-    """[ADR-NNN] 时校验 session log 末行 description 含 audit anchor 子串（ADR-017）。
+def _check_review_record(repo_root: Path, config: Config, adr_id: str) -> None:
+    """[ADR-NNN] 时校验 .git/spec-vc-review.json（ADR-018）。
 
-    - anchor 文件不存在 → 阻塞（要求走 commit prepare）
-    - anchor 文件存在 + session log 末行不含 anchor 子串 → 阻塞 + 输出当前 anchor
-    - 末行解析失败 → fail-open（与 freshness 一致）
+    取代 ADR-013/017 的 session log + anchor 间接证据，把审计证据搭在直接文件上。
+    所有阻塞输出走 BlockingError 结构（含 reason / current_state / fix_commands / docs_ref）。
     """
-    from .commit import SUBAGENT_SESSIONS_FILENAME, read_audit_anchor
+    adr_token = f"ADR-{adr_id}"
+    expected_anchor = compute_audit_anchor(repo_root, adr_token)
+    expected_sha12 = expected_anchor.split("@", 1)[1]
 
-    anchor = read_audit_anchor(repo_root)
-    if anchor is None:
-        raise ValidationError(
-            "[spec-vc] Commit 被阻塞: 未找到 .git/spec-vc-audit-anchor (ADR-017)。\n"
-            f"原因：本次 commit 引用 ADR-{adr_id} 但未走 spec-vc commit prepare 生成 anchor，"
-            "audit 与本次 staged 内容无绑定。\n"
-            "下一步：运行 spec-vc commit prepare --message \"<完整 commit message>\" 生成 anchor，\n"
-            "在 audit subagent 的 description 中复述 anchor，再 git commit。\n"
-            "紧急情况下可临时绕过：SPEC_VC_BYPASS=<原因> git commit ...\n"
-            "详细流程请查看 SKILL.md"
+    rv_path = review_path(repo_root)
+    record = read_review(repo_root)
+    if record is None:
+        err = BlockingError(
+            reason=f"review.json 不存在或解析失败 ({adr_token})",
+            current_state=(
+                f"expected: .git/spec-vc-review.json\n"
+                f"actual: {'不存在' if not rv_path.exists() else '非法 JSON'}\n"
+                f"current staged sha12: {expected_sha12}\n"
+                f"expected anchor: {expected_anchor}"
+            ),
+            fix_commands=[
+                f'spec-vc review --mode subagent --message "<完整 commit message 含 [{adr_token}]>"',
+                "git commit",
+            ],
+            docs_ref=["SKILL.md#commit-审查-提交", "ADR-018", "Spec-018"],
         )
+        raise ValidationError(err.format())
 
-    log_path = repo_root / ".git" / SUBAGENT_SESSIONS_FILENAME
-    if not log_path.exists():
-        return  # check_subagent_session 已处理
+    if record.anchor != expected_anchor:
+        simple_note_hint = (
+            f' --note "<审查结论，必须含 {expected_anchor}>"' if record.mode == "simple" else ""
+        )
+        err = BlockingError(
+            reason=f"review.json.anchor 不匹配当前 staged ({adr_token})",
+            current_state=(
+                f"expected: {expected_anchor}\n"
+                f"actual: {record.anchor}\n"
+                f"原因: staged 内容自上次 review 后已变化，需重新审查"
+            ),
+            fix_commands=[
+                f'spec-vc review --mode {record.mode} --message "<完整 commit message>"{simple_note_hint}',
+            ],
+            docs_ref=["ADR-018", "Spec-018"],
+        )
+        raise ValidationError(err.format())
 
-    lines = [line for line in log_path.read_text().splitlines() if line.strip()]
-    if not lines:
+    msg_path = repo_root / ".git" / COMMIT_MSG_FILENAME
+    if msg_path.exists():
+        if rv_path.stat().st_mtime <= msg_path.stat().st_mtime:
+            rv_ts = datetime.datetime.fromtimestamp(rv_path.stat().st_mtime).astimezone()
+            msg_ts = datetime.datetime.fromtimestamp(msg_path.stat().st_mtime).astimezone()
+            err = BlockingError(
+                reason="review.json mtime ≤ commit-msg mtime（审计证据不新鲜）",
+                current_state=(
+                    f"review.json mtime: {rv_ts.isoformat(timespec='seconds')}\n"
+                    f"commit-msg mtime: {msg_ts.isoformat(timespec='seconds')}\n"
+                    f"原因: 审计可能是历史遗留，未对应本次 commit message"
+                ),
+                fix_commands=[
+                    f'spec-vc review --mode {record.mode} --message "<完整 commit message>"',
+                ],
+                docs_ref=["ADR-018", "Spec-018"],
+            )
+            raise ValidationError(err.format())
+
+    if record.mode == "simple" and record.anchor not in record.note:
+        err = BlockingError(
+            reason="simple 模式 review.json.note 不含 anchor 子串",
+            current_state=(
+                f"anchor: {record.anchor}\n"
+                f"note: {record.note}\n"
+                f"原因: simple 模式要求 AI 在 note 中复述 anchor，强制至少读一次 staged diff 指纹"
+            ),
+            fix_commands=[
+                f'spec-vc review --mode simple --message "<commit msg>" --note "<结论，必须含 {record.anchor}>"',
+            ],
+            docs_ref=["ADR-018", "Spec-018"],
+        )
+        raise ValidationError(err.format())
+
+    if config.lightweight.require_user_verified and not record.verified:
+        err = BlockingError(
+            reason="require_user_verified=true 但 review.json.verified=false",
+            current_state=(
+                f"review.json.verified: {record.verified}\n"
+                f"config.lightweight.require_user_verified: True\n"
+                f"原因: 配置要求用户实际验证后才能 commit"
+            ),
+            fix_commands=[
+                f'spec-vc review --verified --mode {record.mode} --message "<commit msg>"',
+            ],
+            docs_ref=["ADR-018", "Spec-018"],
+        )
+        raise ValidationError(err.format())
+
+
+def _check_lightweight(repo_root: Path, config: Config) -> None:
+    """[ADR-none] 量化判定（ADR-018）。未命中即阻塞。"""
+    result = detect_lightweight_change(repo_root, config.lightweight)
+    if result.is_lightweight:
         return
 
-    last_line = lines[-1]
-    parts = last_line.split(" | ", 2)
-    if len(parts) < 3:
-        return  # fail-open（格式异常）
-    description = parts[2]
-
-    if anchor not in description:
-        raise ValidationError(
-            f"[spec-vc] Commit 被阻塞: session log 末行 description 不含 audit anchor (ADR-017)。\n"
-            f"  当前 anchor: {anchor}\n"
-            f"  末行 description: {description}\n"
-            "原因：audit 与本次 staged 内容无绑定，可能是历史 audit 复用或未读 staged diff。\n"
-            "下一步：启动新的 audit subagent，在其 description 中复述上述 anchor 字符串，"
-            "完成后重新 git commit。\n"
-            "紧急情况下可临时绕过：SPEC_VC_BYPASS=<原因> git commit ...\n"
-            "详细流程请查看 SKILL.md"
-        )
+    state_lines = [
+        f"files_count: {result.metrics.files_count} (limit {config.lightweight.files_max})",
+        f"lines_delta: {result.metrics.lines_delta} (limit {config.lightweight.lines_max})",
+        f"unmatched_files: {result.metrics.unmatched_files}",
+        f"unmet rules: {result.reasons}",
+    ]
+    err = BlockingError(
+        reason="[ADR-none] 未命中量化轻量规则",
+        current_state="\n".join(state_lines),
+        fix_commands=[
+            "升级 commit: 改 subject 含具体 [ADR-NNN]，并按 spec-vc 流程走 spec-vc review",
+            "或拆分本次 commit 至轻量阈值内（默认 files≤5 + lines≤50 + 全部命中 type_whitelist）",
+            "紧急情况绕过: SPEC_VC_BYPASS=<原因> git commit ...",
+        ],
+        docs_ref=["ADR-018", "Spec-018", "SKILL.md#轻量路径"],
+    )
+    raise ValidationError(err.format())
 
 
 def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "") -> int:
@@ -272,11 +344,8 @@ def run_commit_msg(message_file: Path) -> int:
 
     token = tokens[0]
     if token == "ADR-none":
-        files = staged_files(repo_root)
-        total = sum(add + delete for add, delete, _ in staged_diff_numstat(repo_root))
-        allowed, reason = exemption_allows(config, files, total)
-        if not allowed:
-            raise ValidationError(f"[spec-vc] [ADR-none] 不符合豁免规则: {reason}")
+        if not bypass_reason:
+            _check_lightweight(repo_root, config)
         return 0
 
     match = EXACT_NUM_RE.search(f"[{token}]")
@@ -289,19 +358,11 @@ def run_commit_msg(message_file: Path) -> int:
     adr = parse_adr(adr_file)
     ensure_referenceable(adr, adr_id)
 
-    # [ADR-NNN] 额外检查: session 审计 + plan stage + Spec 完整性 + anchor 绑定（ADR-017）
-    if not bypass_reason:
-        try:
-            check_subagent_session(repo_root)
-        except FileNotFoundError as e:
-            raise ValidationError(str(e)) from e
-        try:
-            check_session_log_freshness(repo_root)
-        except FileNotFoundError as e:
-            raise ValidationError(str(e)) from e
-        _check_anchor_binding(repo_root, adr_id)
+    # [ADR-NNN] 额外检查（ADR-018：用 review.json 替代 session log + anchor 间接证据）
     _check_plan_stage(repo_root, config, adr_id)
     _check_spec_readiness_for_adr(repo_root, config, adr_id)
+    if not bypass_reason:
+        _check_review_record(repo_root, config, adr_id)
 
     return 0
 
