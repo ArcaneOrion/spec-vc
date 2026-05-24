@@ -1,0 +1,58 @@
+```yaml
+openapi: "3.0.3"
+info:
+  title: spec-vc hook/venv 入口确定性契约（ADR-021）
+  version: "0.1.0"
+  description: |
+    本 Spec 使用 /internal/* 路径表达 CLI hook 行为契约，不代表 HTTP 服务。
+
+paths:
+  /internal/hook/commit-msg-entrypoint:
+    post:
+      summary: commit-msg hook 入口选择顺序
+      description: |
+        当 git 执行 .git/hooks/commit-msg 时，hook 必须按以下顺序选择入口：
+        1. 读取 init 注入的 SPEC_VC_BIN（默认 $HOME/.claude/skills/spec-vc/.venv/bin/spec-vc）
+        2. 如果 SPEC_VC_BIN 可执行，则 exec "$SPEC_VC_BIN" hook commit-msg "$1"
+        3. 仅当 SPEC_VC_BIN 不存在或不可执行时，才 fallback 到 PATH 中的 spec-vc
+        4. 如果两者都不可用，stderr 输出明确错误并 exit 1
+
+        PATH 中的 spec-vc 不得抢占可执行的 SPEC_VC_BIN。
+      responses:
+        "0":
+          description: hook 入口执行成功并完成 commit-msg 校验
+        "1":
+          description: SPEC_VC_BIN 与 PATH fallback 均不可用，或下游 hook 校验阻塞
+
+  /internal/hook/prepare-commit-msg-entrypoint:
+    post:
+      summary: prepare-commit-msg hook 入口选择顺序
+      description: |
+        当 git 执行 .git/hooks/prepare-commit-msg 时，hook 必须按以下顺序选择入口：
+        1. 读取 init 注入的 SPEC_VC_BIN（默认 $HOME/.claude/skills/spec-vc/.venv/bin/spec-vc）
+        2. 如果 SPEC_VC_BIN 可执行，则 exec "$SPEC_VC_BIN" hook prepare-commit-msg "$1" "${2:-}" "${3:-}"
+        3. 仅当 SPEC_VC_BIN 不存在或不可执行时，才 fallback 到 PATH 中的 spec-vc
+        4. 如果两者都不可用，stderr 输出明确错误并 exit 1
+
+        PATH 中的 spec-vc 不得抢占可执行的 SPEC_VC_BIN。
+      responses:
+        "0":
+          description: hook 入口执行成功并完成 prepare-commit-msg 处理
+        "1":
+          description: SPEC_VC_BIN 与 PATH fallback 均不可用，或下游 hook 处理失败
+
+  /internal/init/install-hook:
+    post:
+      summary: spec-vc init 写入 deterministic hook
+      description: |
+        spec-vc init 写入 hook 模板时，{{SPEC_VC_BIN}} 必须替换为 $HOME/.claude/skills/spec-vc/.venv/bin/spec-vc。
+        禁止写入双引号内的 ~ 路径，因为 bash 变量中的 ~ 不会展开。
+        重跑 spec-vc init 必须覆盖旧 hook，使 PATH 优先的历史 hook 被治愈。
+      responses:
+        "0":
+          description: hook 已安装或修复
+        "1":
+          description: init 失败
+```
+
+---

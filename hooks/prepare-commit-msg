@@ -3,15 +3,15 @@
 # Version: 0.3.0
 set -euo pipefail
 
-# 优先使用 PATH 中的 spec-vc
-if command -v spec-vc &>/dev/null; then
-    exec spec-vc hook prepare-commit-msg "$1" "${2:-}" "${3:-}"
-fi
-
-# Fallback: init 时写入的 venv 绝对路径
+# 优先使用 init 写入的 deterministic skill venv 入口
 SPEC_VC_BIN="{{SPEC_VC_BIN}}"
 if [[ -x "$SPEC_VC_BIN" ]]; then
     exec "$SPEC_VC_BIN" hook prepare-commit-msg "$1" "${2:-}" "${3:-}"
+fi
+
+# Fallback: 兼容全局安装或其他 CLI agent 环境
+if command -v spec-vc &>/dev/null; then
+    exec spec-vc hook prepare-commit-msg "$1" "${2:-}" "${3:-}"
 fi
 
 echo "[spec-vc] 致命：找不到 spec-vc 可执行文件" >&2

@@ -1,0 +1,42 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "HookEntrypointConfig": {
+      "type": "object",
+      "required": ["spec_vc_bin", "fallback_policy"],
+      "properties": {
+        "spec_vc_bin": {
+          "type": "string",
+          "const": "$HOME/.claude/skills/spec-vc/.venv/bin/spec-vc",
+          "description": "init 注入到 hook 模板中的 deterministic skill venv 入口"
+        },
+        "fallback_policy": {
+          "type": "string",
+          "enum": ["spec_vc_bin_first_path_last"],
+          "description": "先 SPEC_VC_BIN，后 PATH fallback"
+        },
+        "compatible_agents": {
+          "type": "array",
+          "items": { "type": "string" },
+          "examples": [["Claude Code", "Codex", "other CLI agent"]]
+        }
+      }
+    },
+    "HookInvocation": {
+      "type": "object",
+      "required": ["hook", "argv", "selected_entrypoint"],
+      "properties": {
+        "hook": { "type": "string", "enum": ["commit-msg", "prepare-commit-msg"] },
+        "argv": { "type": "array", "items": { "type": "string" } },
+        "selected_entrypoint": {
+          "type": "string",
+          "enum": ["SPEC_VC_BIN", "PATH_FALLBACK", "NONE"]
+        }
+      }
+    }
+  }
+}
+```
+
+---

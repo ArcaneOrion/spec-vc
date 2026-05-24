@@ -6,6 +6,11 @@ import json
 import os
 
 
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content)
+    path.chmod(0o755)
+
+
 def run(repo: Path, *args: str, check: bool = False, stdin: str | None = None):
     root = Path(__file__).resolve().parents[2]
     env = {**os.environ, "PYTHONPATH": str(root / "src")}
@@ -66,6 +71,14 @@ def test_init_bootstraps_repo(tmp_path: Path):
     assert (repo / ".git" / "hooks" / "commit-msg").stat().st_mode & 0o111
     commit_template = subprocess.run(["git", "config", "commit.template"], cwd=repo, text=True, capture_output=True, check=True)
     assert commit_template.stdout.strip().endswith("templates/commit-msg")
+    commit_hook = (repo / ".git" / "hooks" / "commit-msg").read_text()
+    prepare_hook = (repo / ".git" / "hooks" / "prepare-commit-msg").read_text()
+    assert '$HOME/.claude/skills/spec-vc/.venv/bin/spec-vc' in commit_hook
+    assert '$HOME/.claude/skills/spec-vc/.venv/bin/spec-vc' in prepare_hook
+    assert 'command -v spec-vc' in commit_hook
+    assert 'command -v spec-vc' in prepare_hook
+    assert '~/.claude/skills/spec-vc/.venv/bin/spec-vc' not in commit_hook
+    assert '~/.claude/skills/spec-vc/.venv/bin/spec-vc' not in prepare_hook
     assert (repo / ".claude" / "settings.json").exists()
     settings = json.loads((repo / ".claude" / "settings.json").read_text())
     assert "PostToolUse" in settings.get("hooks", {})
@@ -77,6 +90,38 @@ def test_init_runs_uv_sync(tmp_path: Path):
     assert "uv sync" in proc.stdout
     root = Path(__file__).resolve().parents[2]
     assert (root / ".venv").exists()
+
+
+def test_hook_templates_prefer_spec_vc_bin_over_path(tmp_path: Path):
+    root = Path(__file__).resolve().parents[2]
+    good = tmp_path / "good" / "spec-vc"
+    bad = tmp_path / "bad" / "spec-vc"
+    called = tmp_path / "called.txt"
+    bad_called = tmp_path / "bad-called.txt"
+    good.parent.mkdir()
+    bad.parent.mkdir()
+    _write_executable(good, f"#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > {called}\nexit 0\n")
+    _write_executable(bad, f"#!/usr/bin/env bash\ntouch {bad_called}\nexit 42\n")
+
+    env = {**os.environ, "PATH": f"{bad.parent}:{os.environ['PATH']}"}
+    for hook_name, expected in [
+        ("commit-msg", "hook commit-msg"),
+        ("prepare-commit-msg", "hook prepare-commit-msg"),
+    ]:
+        called.unlink(missing_ok=True)
+        bad_called.unlink(missing_ok=True)
+        hook = tmp_path / hook_name
+        template = (root / "hooks" / hook_name).read_text()
+        hook.write_text(template.replace("{{SPEC_VC_BIN}}", str(good)))
+        hook.chmod(0o755)
+        msg = tmp_path / f"{hook_name}.msg"
+        msg.write_text("subject\n")
+
+        proc = subprocess.run([str(hook), str(msg)], text=True, capture_output=True, env=env)
+
+        assert proc.returncode == 0, proc.stderr
+        assert called.read_text().startswith(expected)
+        assert not bad_called.exists()
 
 
 
@@ -575,7 +620,7 @@ def test_init_writes_post_tool_use_hook_without_args(tmp_path: Path):
         assert "--tool-name" not in cmd
         assert "--description" not in cmd
         assert "CLAUDE_TOOL_DESCRIPTION" not in cmd
-        assert cmd.endswith("hook post-tool-use")
+        assert cmd == "$HOME/.claude/skills/spec-vc/.venv/bin/spec-vc hook post-tool-use"
 
 
 def test_init_migrates_legacy_post_tool_use_hook(tmp_path: Path):

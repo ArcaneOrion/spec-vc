@@ -65,9 +65,8 @@ def _write_if_missing(path: Path, content: str) -> None:
 def _install_hook(repo_root: Path, name: str) -> Path:
     hook_path = repo_root / ".git" / "hooks" / name
     template = (skill_root() / "hooks" / name).read_text()
-    # 使用 ~ 路径而非 .resolve()，让 shell 在执行时展开到当前用户的 $HOME；
-    # 跨开发者共享时不污染他人 settings/hook（ADR-020 之后 hook 行为已对齐）
-    spec_vc_bin = "~/.claude/skills/spec-vc/.venv/bin/spec-vc"
+    # 使用 $HOME 而非 ~，避免 bash 变量中的 ~ 不展开。
+    spec_vc_bin = "$HOME/.claude/skills/spec-vc/.venv/bin/spec-vc"
     content = template.replace("{{SPEC_VC_BIN}}", spec_vc_bin)
     hook_path.write_text(content)
     hook_path.chmod(0o755)
@@ -97,7 +96,7 @@ def _init_claude_hook(repo_root: Path) -> Path | None:
     """
     claude_dir = repo_root / ".claude"
     settings_path = claude_dir / "settings.json"
-    spec_vc_bin = "~/.claude/skills/spec-vc/.venv/bin/spec-vc"
+    spec_vc_bin = "$HOME/.claude/skills/spec-vc/.venv/bin/spec-vc"
     expected_command = f"{spec_vc_bin} hook post-tool-use"
 
     hook_entry = {
