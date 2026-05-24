@@ -231,23 +231,6 @@ def test_commit_msg_blocks_without_subagent_session(tmp_path: Path):
     assert "ADR-018" in proc.stderr or "SKILL.md" in proc.stderr
 
 
-def test_commit_msg_rejects_adr_none_for_code_change(tmp_path: Path):
-    """ADR-018: [ADR-none] + 代码文件未命中 type_whitelist → 量化判定阻塞 + BlockingError。"""
-    repo = init_repo(tmp_path)
-    src = repo / "src"
-    src.mkdir()
-    (src / "main.py").write_text("print('x')\n")
-    subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
-    msg = repo / "msg.txt"
-    msg.write_text("feat: x [ADR-none]\n")
-    proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode != 0
-    assert "未命中量化轻量规则" in proc.stderr
-    assert "unmatched_files" in proc.stderr
-    assert "src/main.py" in proc.stderr
-    assert "ADR-018" in proc.stderr
-
-
 def test_commit_msg_allows_adr_none_for_docs_change(tmp_path: Path):
     repo = init_repo(tmp_path)
     (repo / "README.md").write_text("doc change\n")
@@ -386,21 +369,6 @@ def _complete_clarify(repo: Path) -> None:
         "--implementation", "测试实现",
         "--verification", "测试验证",
         "--rollback", "测试回滚")
-
-
-def test_hook_blocks_adr_with_plan_stage_below_implement_ready(tmp_path: Path):
-    """ADR-011: plan stage 为 clarify 时，[ADR-NNN] 提交被 hook 阻塞。"""
-    repo = init_repo(tmp_path)
-    (repo / "README.md").write_text("doc change\n")
-    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    _setup_active_change(repo)
-    _write_subagent_session(repo)
-    msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-000]\n")
-    proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode != 0, "clarify stage 应阻塞提交"
-    assert "implement-ready" in proc.stderr
-    assert "SKILL.md" in proc.stderr
 
 
 def test_hook_allows_adr_at_implement_ready_stage(tmp_path: Path):
@@ -882,182 +850,6 @@ def test_bypass_skips_anchor_binding(tmp_path: Path):
     assert proc.returncode == 0, f"BYPASS 应旁路 review 检查, stderr={proc.stderr}"
 
 
-def test_load_stage_for_adr_uses_active_when_match(tmp_path: Path):
-    """ADR-013: active.adr_id 与传入 adr_id 匹配时用 active.stage。"""
-    import sys
-    repo = init_repo(tmp_path)
-    run(repo, "change", "start", "--adr", "000", "--summary", "测试")
-    # active stage 是 clarify
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-    try:
-        from spec_vc.hooks import _load_stage_for_adr
-    finally:
-        sys.path.pop(0)
-    adr_dir = repo / "doc" / "arch"
-    assert _load_stage_for_adr(adr_dir, "000") == "clarify"
-
-
-def test_load_stage_for_adr_falls_back_to_plan(tmp_path: Path):
-    """ADR-013: active.adr_id 与传入 adr_id 不匹配时回退到 plan 文件。"""
-    import sys
-    repo = init_repo(tmp_path)
-    run(repo, "adr", "new", "另一决策")  # 创建 ADR-001
-    # active 是 ADR-000
-    run(repo, "change", "start", "--adr", "000", "--summary", "ADR-000 active")
-    # 手动写一份 ADR-001 的 plan 文件，stage=close
-    plan_path = repo / "doc" / "arch" / "plans" / "ADR-001-plan-001.md"
-    plan_path.write_text(
-        "# ADR-001 执行方案 001\n\n"
-        "- **ADR**: ADR-001\n"
-        "- **Stage**: close\n"
-        "- **Status**: archived\n"
-    )
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-    try:
-        from spec_vc.hooks import _load_stage_for_adr
-    finally:
-        sys.path.pop(0)
-    adr_dir = repo / "doc" / "arch"
-    # 查 ADR-001 应该 fallback 到 plan，而不是用 active 的 ADR-000 stage
-    assert _load_stage_for_adr(adr_dir, "001") == "close"
-
-
-def test_load_stage_for_adr_returns_none_when_no_plan(tmp_path: Path):
-    """ADR-013: ADR 无 plan 文件 → 返回 None（流程已结束，不阻塞）。"""
-    import sys
-    repo = init_repo(tmp_path)
-    run(repo, "change", "start", "--adr", "000", "--summary", "ADR-000 active")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-    try:
-        from spec_vc.hooks import _load_stage_for_adr
-    finally:
-        sys.path.pop(0)
-    adr_dir = repo / "doc" / "arch"
-    assert _load_stage_for_adr(adr_dir, "099") is None
-
-
-def test_load_stage_for_adr_picks_largest_plan_id(tmp_path: Path):
-    """ADR-013: 多个 plan 时取编号最大的 stage。"""
-    import sys
-    repo = init_repo(tmp_path)
-    run(repo, "adr", "new", "另一决策")
-    run(repo, "change", "start", "--adr", "000", "--summary", "ADR-000 active")
-    plans_dir = repo / "doc" / "arch" / "plans"
-    (plans_dir / "ADR-001-plan-001.md").write_text(
-        "# ADR-001 执行方案 001\n\n- **ADR**: ADR-001\n- **Stage**: close\n"
-    )
-    (plans_dir / "ADR-001-plan-002.md").write_text(
-        "# ADR-001 执行方案 002\n\n- **ADR**: ADR-001\n- **Stage**: plan\n"
-    )
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-    try:
-        from spec_vc.hooks import _load_stage_for_adr
-    finally:
-        sys.path.pop(0)
-    adr_dir = repo / "doc" / "arch"
-    assert _load_stage_for_adr(adr_dir, "001") == "plan"
-
-
-# ─── ADR-018: 量化判定单元测试 ─────────────────────────────────────────────
-
-
-def test_lightweight_passes_for_docs_only_under_limits(tmp_path: Path):
-    """ADR-018: 文档改动 + 文件数/行数都在阈值内 → 命中量化轻量。"""
-    from spec_vc.config import LightweightConfig
-    from spec_vc.lightweight import detect_lightweight_change
-
-    repo = init_repo(tmp_path)
-    (repo / "README.md").write_text("hello\n")
-    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    cfg = LightweightConfig()
-    result = detect_lightweight_change(repo, cfg)
-    assert result.is_lightweight is True
-    assert result.reasons == []
-
-
-def test_lightweight_blocks_when_files_exceed_max(tmp_path: Path):
-    """ADR-018: 文件数 > files_max → 未命中量化。"""
-    from spec_vc.config import LightweightConfig
-    from spec_vc.lightweight import detect_lightweight_change
-
-    repo = init_repo(tmp_path)
-    for i in range(6):
-        (repo / f"doc{i}.md").write_text("x\n")
-        subprocess.run(["git", "add", f"doc{i}.md"], cwd=repo, check=True)
-    cfg = LightweightConfig(files_max=5)
-    result = detect_lightweight_change(repo, cfg)
-    assert result.is_lightweight is False
-    assert any("files_count" in r for r in result.reasons)
-    assert result.metrics.files_count == 6
-
-
-def test_lightweight_blocks_when_lines_exceed_max(tmp_path: Path):
-    """ADR-018: 净变更行数 > lines_max → 未命中。"""
-    from spec_vc.config import LightweightConfig
-    from spec_vc.lightweight import detect_lightweight_change
-
-    repo = init_repo(tmp_path)
-    (repo / "README.md").write_text("\n".join(["line"] * 100) + "\n")
-    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    cfg = LightweightConfig(lines_max=50)
-    result = detect_lightweight_change(repo, cfg)
-    assert result.is_lightweight is False
-    assert any("lines_delta" in r for r in result.reasons)
-
-
-def test_lightweight_blocks_when_unmatched_file_type(tmp_path: Path):
-    """ADR-018: 含未命中 type_whitelist 的文件 → 未命中。"""
-    from spec_vc.config import LightweightConfig
-    from spec_vc.lightweight import detect_lightweight_change
-
-    repo = init_repo(tmp_path)
-    (repo / "src").mkdir()
-    (repo / "src" / "main.py").write_text("x\n")
-    subprocess.run(["git", "add", "src/main.py"], cwd=repo, check=True)
-    cfg = LightweightConfig()
-    result = detect_lightweight_change(repo, cfg)
-    assert result.is_lightweight is False
-    assert "src/main.py" in result.metrics.unmatched_files
-
-
-def test_lightweight_passes_doc_glob_pattern(tmp_path: Path):
-    """ADR-018: doc/** 这种 glob 前缀模式应被识别。"""
-    from spec_vc.config import LightweightConfig
-    from spec_vc.lightweight import detect_lightweight_change
-
-    repo = init_repo(tmp_path)
-    (repo / "doc" / "arch" / "extra.md").write_text("x\n")
-    subprocess.run(["git", "add", "doc/arch/extra.md"], cwd=repo, check=True)
-    cfg = LightweightConfig()
-    result = detect_lightweight_change(repo, cfg)
-    assert result.is_lightweight is True, f"reasons: {result.reasons}"
-
-
-# ─── ADR-018: simple 模式 ──────────────────────────────────────────────────
-
-
-def test_review_simple_mode_requires_note(tmp_path: Path):
-    """ADR-018: simple 模式无 --note → 阻塞 + BlockingError 含 anchor。"""
-    repo = init_repo(tmp_path)
-    (repo / "README.md").write_text("doc\n")
-    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    proc = run(repo, "review", "--mode", "simple", "--message", "docs: x [ADR-000]")
-    assert proc.returncode != 0
-    assert "simple 模式必须提供 --note" in proc.stderr
-    assert "BLOCKED" in proc.stderr
-
-
-def test_review_simple_mode_note_must_contain_anchor(tmp_path: Path):
-    """ADR-018: simple 模式 --note 不含 anchor → 阻塞 + BlockingError 含期望 anchor。"""
-    repo = init_repo(tmp_path)
-    (repo / "README.md").write_text("doc\n")
-    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    proc = run(repo, "review", "--mode", "simple", "--message", "docs: x [ADR-000]", "--note", "no anchor here")
-    assert proc.returncode != 0
-    assert "不含 anchor" in proc.stderr
-    assert "ADR-000@" in proc.stderr
-
-
 def test_review_simple_mode_with_anchor_in_note_passes(tmp_path: Path):
     """ADR-018: simple 模式 --note 含 anchor → 成功 + review.json 含 simple mode。"""
     import json as _json
@@ -1105,22 +897,6 @@ def test_blocking_error_output_contains_four_sections(tmp_path: Path):
     assert "Docs:" in proc.stderr
     # fix_commands 至少一条以 "$" 前缀
     assert "$ " in proc.stderr
-
-
-def test_require_user_verified_blocks_when_verified_false(tmp_path: Path):
-    """ADR-018: .spec-vc.toml 配置 require_user_verified=true 时，verified=false 阻塞。"""
-    repo = init_repo(tmp_path)
-    config_path = repo / ".spec-vc.toml"
-    config_path.write_text(config_path.read_text() + "\n[lightweight]\nrequire_user_verified = true\n")
-    (repo / "README.md").write_text("doc\n")
-    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    _write_subagent_session(repo, adr_id="000")  # 默认 verified=False
-    msg = repo / "msg.txt"
-    msg.write_text("docs: update [ADR-000]\n")
-    proc = run(repo, "hook", "commit-msg", str(msg))
-    assert proc.returncode != 0
-    assert "user_verified" in proc.stderr or "verified" in proc.stderr
-    assert "--verified" in proc.stderr
 
 
 def test_post_tool_use_still_writes_session_log(tmp_path: Path):

@@ -12,7 +12,6 @@ from .commit import SUBAGENT_SESSIONS_FILENAME, compute_audit_anchor, COMMIT_MSG
 from .config import Config, load_config
 from .errors import BlockingError, ValidationError
 from .gitops import repo_root_from
-from .lightweight import detect_lightweight_change
 from .review import read_review, review_path
 
 
@@ -21,70 +20,6 @@ EXACT_NONE_RE = re.compile(r"\[ADR-none\]")
 EXACT_NUM_RE = re.compile(r"\[ADR-(\d{3,})\]")
 
 BYPASS_LOG_FILENAME = "spec-vc-bypass.log"
-ACTIVE_FILE_NAME = "_active.md"
-PLAN_DIR_NAME = "plans"
-
-IMPLEMENT_READY_OR_LATER = {"implement-ready", "validate", "close"}
-
-
-def _load_stage_for_adr(adr_dir: Path, adr_id: str) -> str | None:
-    """按 adr_id 路由读取变更 stage。
-
-    优先级：
-    1. _active.md 的 ADR 字段匹配 adr_id → 用 active.stage
-    2. 否则从 plans/ADR-{adr_id}-plan-*.md 取编号最大的，读 - **Stage**: 字段
-    3. 该 ADR 无 plan 文件 → 返回 None（流程已结束，不阻塞）
-    """
-    plans_dir = adr_dir / PLAN_DIR_NAME
-    active_path = plans_dir / ACTIVE_FILE_NAME
-
-    if active_path.exists():
-        active_adr: str | None = None
-        active_stage: str | None = None
-        for line in active_path.read_text().splitlines():
-            if line.startswith("- **ADR**:"):
-                raw = line.split(":", 1)[1].strip()
-                active_adr = raw.replace("ADR-", "")
-            elif line.startswith("- **Stage**:"):
-                active_stage = line.split(":", 1)[1].strip()
-        if active_adr == adr_id and active_stage:
-            return active_stage
-
-    if not plans_dir.exists():
-        return None
-    pattern = re.compile(rf"^ADR-{re.escape(adr_id)}-plan-(\d+)\.md$")
-    candidates: list[tuple[int, Path]] = []
-    for path in plans_dir.iterdir():
-        m = pattern.match(path.name)
-        if m:
-            candidates.append((int(m.group(1)), path))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: x[0])
-    _, latest_plan = candidates[-1]
-    for line in latest_plan.read_text().splitlines():
-        if line.startswith("- **Stage**:"):
-            return line.split(":", 1)[1].strip()
-    return None
-
-
-def _check_plan_stage(repo_root: Path, config: Config, adr_id: str) -> None:
-    """检查 ADR 对应的变更计划 stage ≥ implement-ready。
-
-    使用 _load_stage_for_adr 按 adr_id 路由读取，正确处理 commit 引用 ADR-X
-    而 active 是 ADR-Y 的场景（fallback 到 plan 文件）。
-    无 plan 文件（流程已走完或 ADR 未启动 plan）→ 不阻塞。
-    """
-    adr_dir = repo_root / config.project.adr_dir
-    stage = _load_stage_for_adr(adr_dir, adr_id)
-    if stage is not None and stage not in IMPLEMENT_READY_OR_LATER:
-        raise ValidationError(
-            f"[spec-vc] Commit 被阻塞: ADR-{adr_id} 的变更计划 stage 为 '{stage}'，"
-            f"需推进到 implement-ready 才能提交。\n"
-            f"下一步：运行 spec-vc change validate --phase pre --content \"<前置验证内容>\" "
-            f"完成前置验证后推进到 implement-ready。\n"
-            f"详细流程请查看 SKILL.md"
-        )
 
 
 def _check_spec_readiness_for_adr(repo_root: Path, config: Config, adr_id: str) -> None:
@@ -183,61 +118,6 @@ def _check_review_record(repo_root: Path, config: Config, adr_id: str) -> None:
                 docs_ref=["ADR-018", "Spec-018"],
             )
             raise ValidationError(err.format())
-
-    if record.mode == "simple" and record.anchor not in record.note:
-        err = BlockingError(
-            reason="simple 模式 review.json.note 不含 anchor 子串",
-            current_state=(
-                f"anchor: {record.anchor}\n"
-                f"note: {record.note}\n"
-                f"原因: simple 模式要求 AI 在 note 中复述 anchor，强制至少读一次 staged diff 指纹"
-            ),
-            fix_commands=[
-                f'spec-vc review --mode simple --message "<commit msg>" --note "<结论，必须含 {record.anchor}>"',
-            ],
-            docs_ref=["ADR-018", "Spec-018"],
-        )
-        raise ValidationError(err.format())
-
-    if config.lightweight.require_user_verified and not record.verified:
-        err = BlockingError(
-            reason="require_user_verified=true 但 review.json.verified=false",
-            current_state=(
-                f"review.json.verified: {record.verified}\n"
-                f"config.lightweight.require_user_verified: True\n"
-                f"原因: 配置要求用户实际验证后才能 commit"
-            ),
-            fix_commands=[
-                f'spec-vc review --verified --mode {record.mode} --message "<commit msg>"',
-            ],
-            docs_ref=["ADR-018", "Spec-018"],
-        )
-        raise ValidationError(err.format())
-
-
-def _check_lightweight(repo_root: Path, config: Config) -> None:
-    """[ADR-none] 量化判定（ADR-018）。未命中即阻塞。"""
-    result = detect_lightweight_change(repo_root, config.lightweight)
-    if result.is_lightweight:
-        return
-
-    state_lines = [
-        f"files_count: {result.metrics.files_count} (limit {config.lightweight.files_max})",
-        f"lines_delta: {result.metrics.lines_delta} (limit {config.lightweight.lines_max})",
-        f"unmatched_files: {result.metrics.unmatched_files}",
-        f"unmet rules: {result.reasons}",
-    ]
-    err = BlockingError(
-        reason="[ADR-none] 未命中量化轻量规则",
-        current_state="\n".join(state_lines),
-        fix_commands=[
-            "升级 commit: 改 subject 含具体 [ADR-NNN]，并按 spec-vc 流程走 spec-vc review",
-            "或拆分本次 commit 至轻量阈值内（默认 files≤5 + lines≤50 + 全部命中 type_whitelist）",
-            "紧急情况绕过: SPEC_VC_BYPASS=<原因> git commit ...",
-        ],
-        docs_ref=["ADR-018", "Spec-018", "SKILL.md#轻量路径"],
-    )
-    raise ValidationError(err.format())
 
 
 def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "") -> int:
@@ -344,8 +224,6 @@ def run_commit_msg(message_file: Path) -> int:
 
     token = tokens[0]
     if token == "ADR-none":
-        if not bypass_reason:
-            _check_lightweight(repo_root, config)
         return 0
 
     match = EXACT_NUM_RE.search(f"[{token}]")
@@ -358,8 +236,7 @@ def run_commit_msg(message_file: Path) -> int:
     adr = parse_adr(adr_file)
     ensure_referenceable(adr, adr_id)
 
-    # [ADR-NNN] 额外检查（ADR-018：用 review.json 替代 session log + anchor 间接证据）
-    _check_plan_stage(repo_root, config, adr_id)
+    # [ADR-NNN] ADR-020 减法后：Spec 完整性 + review.json (anchor + mtime)
     _check_spec_readiness_for_adr(repo_root, config, adr_id)
     if not bypass_reason:
         _check_review_record(repo_root, config, adr_id)

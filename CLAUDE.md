@@ -61,28 +61,38 @@ uv run pytest tests/python/ -k "formalize"            # 按关键词筛选
 
 **commit message**: `<type>(<scope>): <subject> [ADR-NNN]`，subject 用中文简述。严格模式(hook)阻塞无 `[ADR-NNN]` 或 `[ADR-none]` 的 commit。
 
-**提交流程**（ADR-018 解耦版 + ADR-019 审查助手，supersedes ADR-011）：
+**提交流程**（ADR-018 解耦 + ADR-019 审查助手 + ADR-020 减法，supersedes ADR-011）：
 - `spec-vc review --mode subagent|simple --message "..." [--note "..."] [--verified]`：独立审查命令
   - 计算 anchor=ADR-XXX@<staged-diff-sha12>
-  - **ADR-019**：先调 assemble_review_report 输出 5 段审查报告到 stderr（Staged Diff Summary / Plan Context / Spec Context / Static Checks / Your Response），AI 读这份报告就是审查发生
-  - 写 `.git/spec-vc-review.json`（含 anchor / mode / verified / note + ADR-019 新增 `context_summary` 字段保存报告摘要）
-  - 写 `.git/spec-vc-commit-msg`
-  - simple 模式必须在 `--note` 文本中复述 anchor 子串
-  - `--verified` 标记用户已实际跑过代码验证使用
+  - **ADR-019**：先调 assemble_review_report 输出 5 段审查报告到 stderr（Staged Diff / Plan / Spec / Static Checks / Your Response），AI 读这份报告就是审查发生
+  - 写 `.git/spec-vc-review.json` + `.git/spec-vc-commit-msg`
+  - **ADR-020**：simple 模式 `--note` 不再强制含 anchor 子串（移除 reasoning scaffolding）
+  - `--verified` 仅作记录，hook 不再校验（ADR-020 删除 `require_user_verified` 升级开关）
 - 用户可在审查后跑代码、点 UI、测接口验证使用
 - `spec-vc commit`（薄包装）或直接 `git commit`，commit-msg hook 自动校验
-- commit-msg hook 校验链：SPEC_VC_BYPASS → ADR 引用 → [ADR-NNN] plan stage + Spec + review.json (anchor 匹配 + mtime 新鲜 + simple 注解) → [ADR-none] 量化判定 → 放行
-- 所有阻塞错误统一为 BlockingError 结构（reason / current_state / fix_commands / docs_ref），AI 读 stderr 后可直接按 fix_commands 修复
+- **commit-msg hook 校验链 4 步（ADR-020 减法后）**：SPEC_VC_BYPASS → ADR 引用 → [ADR-NNN] Spec 完整性 + review.json (anchor 匹配 + mtime 新鲜) → 放行；[ADR-none] 直接放行
+- 所有阻塞错误统一为 BlockingError 结构（reason / current_state / fix_commands / docs_ref），AI 读 stderr 后可按 fix_commands 修复
 - `commit prepare` 保留为 deprecation alias（等价于 `review --mode subagent`），打 warning
-- **设计哲学（ADR-019）**：从 sticks（提高作弊成本）转 carrots（降低遵守成本）；review 是自检不是审批
 
-**SPEC_VC_BYPASS**: 环境变量逃生口，设 `<原因>` 后 `git commit` 跳过 review.json 校验、量化判定，ADR 引用校验、plan stage、Spec 完整性照常。bypass 写审计日志到 `.git/spec-vc-bypass.log`。
+**SPEC_VC_BYPASS**: 环境变量逃生口，设 `<原因>` 后 `git commit` 跳过 review.json 校验，ADR 引用校验、Spec 完整性照常。bypass 写审计日志到 `.git/spec-vc-bypass.log`。
 
 **模板系统**: `templates/` 下存放 ADR/Spec/commit 模板文件，通过 `template_path()` 访问。
 
 **配置**: 项目配置在 `.spec-vc.toml`，CLI 通过 `load_config(repo_root)` 加载，dataclass 承载每个配置段。
 
 **Skill 入口**: `SKILL.md` 是 Claude Code skill 的入口文件（给 AI 读的操作协议），`README.md` 是给人看的项目介绍。两者职责不同。
+
+## ADR 写作规范（ADR-020 硬约束）
+
+ADR 是项目的核心 reference document，写作规范如下（详见 `doc/arch/adr-020.md`）：
+
+1. **自包含可读**：每条 ADR 必须能在不依赖前置 ADR 的情况下被理解。Context 段需重申必要的背景与初心
+2. **锚点必含**：Plan summary 与 ADR Implementation Plans 段必须含 ≥ 1 个具体引用（`file:line` / `function_name()` / commit hash 之一）
+3. **禁用宣示句式**：避免 "设计哲学转向"、"心智模型"、"X 取代 Y"、"sticks/carrots" 等抽象宣示。改用工程语言陈述代码事实
+4. **哲学讨论 ≤ 1 段**：超过的内容写到独立回顾文章，不进 ADR 本体
+5. **AI 行为假设需数据支撑**：声称 "AI 会绕过 X 因为 Y" 时必须引用 bypass log、测试用例或外部研究链接；无数据则不写
+
+这套规范的目的：把 ADR 从"叙事承载"约束为"工程决策记录"，避免 ADR-006~018 时期出现的"哲学叙事覆盖工程改动"模式（VILA-Lab 判别法：reasoning scaffolding 应删，operational harness 应留）。
 
 ## 变更状态机
 

@@ -1,0 +1,113 @@
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ReviewRecord_v020": {
+      "title": "ReviewRecord (ADR-020)",
+      "description": "ADR-019 schema 不变；ADR-020 仅改变 hook 对 verified 字段的处理（不再校验，只作记录）。",
+      "type": "object",
+      "required": ["anchor", "adr_token", "staged_sha12", "mode", "verified", "created_at"],
+      "properties": {
+        "anchor": { "type": "string", "pattern": "^ADR-(\\d{3,}|none)@[0-9a-f]{12}$" },
+        "adr_token": { "type": "string", "pattern": "^ADR-(\\d{3,}|none)$" },
+        "staged_sha12": { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+        "mode": { "type": "string", "enum": ["subagent", "simple"] },
+        "verified": {
+          "type": "boolean",
+          "description": "ADR-020 后仅作记录，hook 不再校验"
+        },
+        "note": {
+          "type": "string",
+          "description": "ADR-020 后 simple 模式不再强制含 anchor 子串"
+        },
+        "subagent_log_tail": { "type": ["string", "null"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "context_summary": {
+          "type": "string",
+          "default": "",
+          "description": "ADR-019 字段保留不变"
+        }
+      }
+    },
+    "CommitMsgHookValidationChain_v020": {
+      "title": "commit-msg hook 4 步校验链",
+      "type": "object",
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["order", "name", "kind"],
+            "properties": {
+              "order": { "type": "integer" },
+              "name": { "type": "string" },
+              "kind": {
+                "type": "string",
+                "enum": ["operational_harness"],
+                "description": "ADR-020 后保留的全部校验项均属 operational harness"
+              }
+            }
+          },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "examples": [
+        {
+          "steps": [
+            { "order": 1, "name": "SPEC_VC_BYPASS audit log", "kind": "operational_harness" },
+            { "order": 2, "name": "ADR 引用格式校验", "kind": "operational_harness" },
+            { "order": 3, "name": "[ADR-NNN] Spec 完整性校验", "kind": "operational_harness" },
+            { "order": 4, "name": "[ADR-NNN] review.json anchor+mtime 校验", "kind": "operational_harness" }
+          ]
+        }
+      ]
+    },
+    "RemovedMechanisms": {
+      "title": "ADR-020 删除清单（参照）",
+      "type": "object",
+      "required": ["hook_checks", "files", "config_fields", "tests"],
+      "properties": {
+        "hook_checks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "删除的 hook 校验项",
+          "examples": [[
+            "_check_plan_stage (plan stage ≥ implement-ready)",
+            "simple 模式 note 含 anchor 子串校验",
+            "[ADR-none] 量化判定 (_check_lightweight)",
+            "require_user_verified 升级开关"
+          ]]
+        },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "examples": [["src/spec_vc/lightweight.py"]]
+        },
+        "config_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "examples": [[
+            "Config.lightweight",
+            "LightweightConfig (全删 dataclass)"
+          ]]
+        },
+        "tests": {
+          "type": "array",
+          "items": { "type": "string" },
+          "examples": [[
+            "test_lightweight_* (5 项)",
+            "test_commit_msg_rejects_adr_none_for_code_change",
+            "test_review_simple_mode_note_must_contain_anchor",
+            "test_require_user_verified_blocks_when_verified_false",
+            "test_freshness_passes_when_review_newer_than_commit_msg (plan stage 相关 setup)"
+          ]]
+        }
+      }
+    }
+  }
+}
+```
+
+---

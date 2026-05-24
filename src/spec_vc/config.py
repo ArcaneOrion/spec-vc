@@ -33,17 +33,6 @@ class SpecConfig:
 
 
 @dataclass(slots=True)
-class LightweightConfig:
-    """ADR-018: [ADR-none] 量化判定阈值 + require_user_verified 升级开关。"""
-    files_max: int = 5
-    lines_max: int = 50
-    type_whitelist: list[str] = field(
-        default_factory=lambda: ["*.md", "*.txt", "doc/**", "docs/**", ".gitignore", ".editorconfig", "*.json"]
-    )
-    require_user_verified: bool = False
-
-
-@dataclass(slots=True)
 class ReviewAssistanceConfig:
     """ADR-019: spec-vc review 审查助手输出控制。"""
     show_diff_summary: bool = True
@@ -66,7 +55,6 @@ class Config:
     exemption: ExemptionConfig = field(default_factory=ExemptionConfig)
     adr_required: AdrRequiredConfig = field(default_factory=AdrRequiredConfig)
     spec: SpecConfig = field(default_factory=SpecConfig)
-    lightweight: LightweightConfig = field(default_factory=LightweightConfig)
     review_assistance: ReviewAssistanceConfig = field(default_factory=ReviewAssistanceConfig)
 
 
@@ -103,11 +91,6 @@ def load_config(repo_root: Path) -> Config:
         config.adr_required.keywords = _get_val("adr_required", "keywords", adr_required, config.adr_required.keywords, list)
         config.adr_required.default_conservative = _get_val("adr_required", "default_conservative", adr_required, config.adr_required.default_conservative, bool)
         config.spec.dir = str(_get_val("spec", "dir", spec, config.spec.dir, str))
-        lightweight = data.get("lightweight", {})
-        config.lightweight.files_max = _get_val("lightweight", "files_max", lightweight, config.lightweight.files_max, int)
-        config.lightweight.lines_max = _get_val("lightweight", "lines_max", lightweight, config.lightweight.lines_max, int)
-        config.lightweight.type_whitelist = _get_val("lightweight", "type_whitelist", lightweight, config.lightweight.type_whitelist, list)
-        config.lightweight.require_user_verified = _get_val("lightweight", "require_user_verified", lightweight, config.lightweight.require_user_verified, bool)
         review_assistance = data.get("review_assistance", {})
         config.review_assistance.show_diff_summary = _get_val("review_assistance", "show_diff_summary", review_assistance, config.review_assistance.show_diff_summary, bool)
         config.review_assistance.show_plan_context = _get_val("review_assistance", "show_plan_context", review_assistance, config.review_assistance.show_plan_context, bool)

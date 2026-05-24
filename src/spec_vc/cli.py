@@ -514,30 +514,6 @@ def cmd_review(args: argparse.Namespace) -> int:
 
     record = build_review_record(repo_root, adr_token, mode, verified, note)
 
-    if mode == "simple":
-        if not note:
-            err = BlockingError(
-                reason="simple 模式必须提供 --note",
-                current_state=f"mode: simple\nnote: (empty)\nanchor: {record.anchor}",
-                fix_commands=[
-                    f'spec-vc review --mode simple --message "..." --note "<审查结论，必须含 {record.anchor}>"',
-                ],
-                docs_ref=["ADR-018", "Spec-018"],
-            )
-            print(err.format(), file=sys.stderr)
-            return 1
-        if record.anchor not in note:
-            err = BlockingError(
-                reason="simple 模式 --note 不含 anchor 子串",
-                current_state=f"anchor: {record.anchor}\nnote: {note}",
-                fix_commands=[
-                    f'spec-vc review --mode simple --message "..." --note "<结论，必须含 {record.anchor}>"',
-                ],
-                docs_ref=["ADR-018", "Spec-018"],
-            )
-            print(err.format(), file=sys.stderr)
-            return 1
-
     from .review_assistance import assemble_review_report
     report = assemble_review_report(repo_root, adr_token, record.anchor, config.review_assistance)
     print(report, file=sys.stderr)
