@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-021
 - **ADR Title**: 修复 hook/venv 入口确定性，兼容 Codex
-- **Stage**: implement-ready
+- **Stage**: close
 - **Created At**: 2026-05-24T22:06:46
 - **Summary**: 修复 hook/venv 入口确定性，避免项目 venv 或 PATH 中旧 spec-vc 抢占；兼容 Claude/Codex/其他 CLI agent 的 git hook 使用
 
@@ -67,16 +67,19 @@ ADR-021 前置验证完成：已复现两个根因：(1) bash 变量中的 ~ 不
 
 ## Post-Change Validation
 
-待补充
+pytest tests/python/ 126 项全部通过，含 test_cli.py 新增的 hook 入口注入测试。f313c79 完成核心修复（hooks/commit-msg、hooks/prepare-commit-msg 优先 SPEC_VC_BIN 且使用字面 $HOME 而非 ~；cli.py:_install_hook 同步注入字面 $HOME 路径），68e091c 同步 .claude/settings.json 与 active context。ADR-021 的 4 个 commit 本身就是 shell 级实测：commit-msg hook 在 PATH 含项目 venv 旧入口情况下仍命中 skill venv 入口并完成 review.json/anchor/mtime/Spec 完整性校验。
+
 
 ## Closure Summary
 
-待补充
+修复 git hook 入口确定性：hook 模板改为 SPEC_VC_BIN（字面 $HOME 路径）优先、PATH 兜底；cli.py:_install_hook 统一注入字面 $HOME 避免 .claude/settings.json 跨开发者污染。解决项目 venv 抢占导致的 ModuleNotFoundError，使 Codex 等非 Claude CLI agent 走普通 git commit 也能稳定触发 spec-vc hook。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-021-plan-001.md
+
 
 ## Checkpoints
 
