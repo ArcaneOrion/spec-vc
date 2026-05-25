@@ -31,7 +31,7 @@ from .hooks import run_commit_msg, run_prepare_commit_msg
 from .index import update_index
 from .skill import load_subsystem_context
 from .status import build_status
-from .commit import gather_commit_context, write_commit_message, COMMIT_MSG_FILENAME
+from .commit import gather_commit_context, COMMIT_MSG_FILENAME
 from .review import (
     build_review_record,
     extract_adr_token,
