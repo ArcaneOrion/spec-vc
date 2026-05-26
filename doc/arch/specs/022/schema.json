@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-vc.local/specs/022/review-document-baseline.schema.json",
+  "title": "ReviewRecord document_baseline extension",
+  "type": "object",
+  "properties": {
+    "document_baseline": {
+      "type": "object",
+      "required": ["version", "adr_token", "files"],
+      "properties": {
+        "version": { "type": "integer", "const": 1 },
+        "adr_token": { "type": "string", "pattern": "^ADR-[0-9]{3,}$" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "kind", "exists", "sha256"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Repository-relative path."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["adr", "plan", "spec-dev-doc", "spec-formal"]
+              },
+              "exists": { "type": "boolean" },
+              "sha256": {
+                "type": ["string", "null"],
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

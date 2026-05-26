@@ -869,6 +869,124 @@ def test_anchor_binding_blocks_when_review_missing_with_adr_nnn(tmp_path: Path):
     assert "spec-vc review" in proc.stderr
 
 
+def test_document_baseline_blocks_when_adr_changes_after_review(tmp_path: Path):
+    """ADR-022: review 后 ADR 基线文档变化 → commit-msg 阻塞。"""
+    repo = init_repo(tmp_path)
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+
+    review = run(repo, "review", "--message", "docs: update [ADR-000]")
+    assert review.returncode == 0, review.stderr
+
+    adr_path = repo / "doc" / "arch" / "adr-000.md"
+    adr_path.write_text(adr_path.read_text() + "\n<!-- drift after review -->\n")
+
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+
+    assert proc.returncode != 0, "ADR 基线变化应阻塞"
+    assert "document_baseline" in proc.stderr or "文档基线" in proc.stderr
+    assert "spec-vc review" in proc.stderr
+
+
+def test_document_baseline_blocks_when_plan_changes_after_review(tmp_path: Path):
+    """ADR-022: review 后 Plan 基线文档变化 → commit-msg 阻塞。"""
+    repo = init_repo(tmp_path)
+    run(repo, "change", "start", "--adr", "000", "--summary", "baseline drift")
+    plan_path = repo / "doc" / "arch" / "plans" / "ADR-000-plan-001.md"
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+
+    review = run(repo, "review", "--message", "docs: update [ADR-000]")
+    assert review.returncode == 0, review.stderr
+
+    plan_path.write_text(plan_path.read_text() + "\n<!-- drift after review -->\n")
+
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+
+    assert proc.returncode != 0, "Plan 基线变化应阻塞"
+    assert "document_baseline" in proc.stderr or "文档基线" in proc.stderr
+    assert "spec-vc review" in proc.stderr
+
+
+def test_document_baseline_blocks_when_spec_changes_after_review(tmp_path: Path):
+    """ADR-022: review 后关联 Spec 形式化文件变化 → commit-msg 阻塞。"""
+    repo = init_repo(tmp_path)
+    run(repo, "spec", "new", "baseline spec", "--adr", "ADR-000")
+    spec_dir = repo / "doc" / "arch" / "specs" / "000"
+    (spec_dir / "dev-doc.md").write_text("""# Spec-000: baseline spec
+
+- **ADR**: ADR-000
+- **Status**: Draft
+- **Author**: test
+- **Date**: 2026-05-25
+- **Version**: 0.1.0
+
+## 概述
+
+baseline overview
+
+## 接口契约
+
+openapi: 3.1.0
+info:
+  title: baseline
+  version: 0.1.0
+paths:
+  /baseline:
+    get:
+      responses:
+        "200":
+          description: ok
+
+## 数据形状
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object"
+}
+
+## 行为规则
+
+Feature: baseline
+  Scenario: baseline
+    Given baseline
+    Then ok
+
+## 非目标
+
+none
+
+## 测试策略
+
+baseline tests
+
+## 日志实现
+
+baseline logs
+""")
+    run(repo, "spec", "formalize", "000", "--type", "all", check=True)
+    (repo / "README.md").write_text("doc\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+
+    review = run(repo, "review", "--message", "docs: update [ADR-000]")
+    assert review.returncode == 0, review.stderr
+
+    schema_path = spec_dir / "schema.json"
+    schema_path.write_text('{"type":"object","properties":{"drift":{"type":"string"}}}\n')
+
+    msg = repo / "msg.txt"
+    msg.write_text("docs: update [ADR-000]\n")
+    proc = run(repo, "hook", "commit-msg", str(msg))
+
+    assert proc.returncode != 0, "Spec 基线变化应阻塞"
+    assert "document_baseline" in proc.stderr or "文档基线" in proc.stderr
+    assert "spec-vc review" in proc.stderr
+
+
 def test_anchor_binding_skipped_for_adr_none(tmp_path: Path):
     """ADR-018: [ADR-none] 不检查 review.json（走量化判定）。"""
     repo = init_repo(tmp_path)

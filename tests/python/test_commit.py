@@ -82,6 +82,12 @@ def test_review_writes_commit_msg(tmp_path: Path):
     assert record["adr_token"] == "ADR-000"
     assert record["mode"] == "subagent"
     assert record["verified"] is False
+    assert record["document_baseline"]["version"] == 1
+    assert record["document_baseline"]["adr_token"] == "ADR-000"
+    assert any(
+        item["path"] == "doc/arch/adr-000.md" and item["kind"] == "adr"
+        for item in record["document_baseline"]["files"]
+    )
 
 
 def test_review_no_manifest_generated(tmp_path: Path):

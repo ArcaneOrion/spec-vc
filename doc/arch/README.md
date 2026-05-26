@@ -44,7 +44,8 @@
 | ADR-018 | 审查/提交解耦：spec-vc review 独立、审计证据脱离 PostToolUse hook | Proposed | 2026-05-24 |
 | ADR-019 | spec-vc review 升级为审查助手：carrots 取代 sticks | Proposed | 2026-05-24 |
 | ADR-020 | spec-vc 做减法：删除 reasoning scaffolding，保留 operational harness | Proposed | 2026-05-24 |
-| ADR-021 | 修复 hook/venv 入口确定性，兼容 Codex | Proposed | 2026-05-24 |
+| ADR-021 | 修复 hook/venv 入口确定性，兼容 Codex | Accepted | 2026-05-24 |
+| ADR-022 | 审计模式冻结对齐文档基线 | Proposed | 2026-05-25 |
 
 ## 状态图例
 

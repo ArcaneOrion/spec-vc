@@ -515,6 +515,9 @@ def cmd_review(args: argparse.Namespace) -> int:
 
     record = build_review_record(repo_root, adr_token, mode, verified, note)
 
+    from .document_baseline import build_document_baseline
+    record.document_baseline = build_document_baseline(repo_root, config, adr_token)
+
     from .review_assistance import assemble_review_report
     report = assemble_review_report(repo_root, adr_token, record.anchor, config.review_assistance)
     print(report, file=sys.stderr)
@@ -635,7 +638,7 @@ def cmd_spec_new(args: argparse.Namespace) -> int:
     author = run_git(repo_root, "config", "user.name", check=False).strip() or "unknown"
     doc_path = create_spec(specs_root, spec_id, title, author, f"ADR-{adr_id}", template_dir=skill_root() / "templates")
     print(f"Spec-{spec_id}: {title}")
-    print(f"  {specs_root / spec_id / 'dev-doc.md'}")
+    print(f"  {doc_path}")
     for fname in ["contract.openapi.yaml", "schema.json", "behavior.feature"]:
         print(f"  {specs_root / spec_id / fname}")
     print(f"推荐 commit message: feat(<scope>): <subject> [ADR-{adr_id}]")

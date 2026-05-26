@@ -10,6 +10,7 @@ import re
 from .adr import ensure_referenceable, parse_adr
 from .commit import SUBAGENT_SESSIONS_FILENAME, compute_audit_anchor, COMMIT_MSG_FILENAME
 from .config import Config, load_config
+from .document_baseline import compare_document_baseline
 from .errors import BlockingError, ValidationError
 from .gitops import repo_root_from
 from .review import read_review, review_path
@@ -118,6 +119,37 @@ def _check_review_record(repo_root: Path, config: Config, adr_id: str) -> None:
                 docs_ref=["ADR-018", "Spec-018"],
             )
             raise ValidationError(err.format())
+
+    mismatches = compare_document_baseline(
+        repo_root,
+        config,
+        record.document_baseline,
+        adr_token,
+    )
+    if mismatches:
+        shown = mismatches[:5]
+        details = []
+        for item in shown:
+            details.append(
+                f"- {item.path} ({item.kind})\n"
+                f"  expected: exists={item.expected_exists}, sha256={item.expected_sha256}\n"
+                f"  actual:   exists={item.actual_exists}, sha256={item.actual_sha256}"
+            )
+        if len(mismatches) > len(shown):
+            details.append(f"- ... 另有 {len(mismatches) - len(shown)} 个文档基线差异")
+        err = BlockingError(
+            reason=f"document_baseline 文档基线已变化 ({adr_token})",
+            current_state=(
+                "review 后 ADR/Plan/Spec 对齐文档发生变化，"
+                "本次审计读取的语义基线不再等于提交时基线。\n"
+                + "\n".join(details)
+            ),
+            fix_commands=[
+                f'spec-vc review --mode {record.mode} --message "<完整 commit message 含 [{adr_token}]>"',
+            ],
+            docs_ref=["ADR-022", "Spec-022", "SKILL.md#6-commit"],
+        )
+        raise ValidationError(err.format())
 
 
 def run_post_tool_use(repo_root: Path, tool_name: str = "", description: str = "") -> int:

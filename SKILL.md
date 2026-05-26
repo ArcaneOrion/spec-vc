@@ -180,8 +180,8 @@ ADR-018 supersedes ADR-011 + ADR-017，ADR-019 在 ADR-018 之上加 carrots 维
 1. 运行 `~/.claude/skills/spec-vc/.venv/bin/spec-vc review --mode subagent --message "<完整 commit message>"`
    - 参数：
      - `--mode subagent|simple`（默认 subagent）
-     - `--note "<审查结论>"`（simple 模式必填且必须含 anchor 子串）
-     - `--verified`（标记用户已实际跑过代码验证使用）
+     - `--note "<审查结论>"`（simple 模式可选，用于记录审查结论）
+     - `--verified`（标记用户已实际跑过代码验证使用，仅作记录）
    - 行为：
      - 计算 `anchor = "ADR-XXX@<staged-diff-sha12>"`，`sha12` 是 staged diff 内容指纹
      - **ADR-019：先调 `assemble_review_report` 输出五段审查报告到 stderr**：
@@ -190,7 +190,7 @@ ADR-018 supersedes ADR-011 + ADR-017，ADR-019 在 ADR-018 之上加 carrots 维
        - `=== Spec Context ===`（关联 Spec 的 contract.openapi.yaml / schema.json / behavior.feature 前 30 行）
        - `=== Static Checks ===`（ruff 可选，缺失静默跳过）
        - `=== Your Response ===`（指引：无问题→`spec-vc commit`；有问题→改代码再 review；末行 audit-anchor）
-     - 写 `.git/spec-vc-review.json`（含 anchor / mode / verified / note / created_at + ADR-019 新增 `context_summary` 字段保存本次报告摘要）
+     - 写 `.git/spec-vc-review.json`（含 anchor / mode / verified / note / created_at + ADR-019 新增 `context_summary` 字段保存本次报告摘要；ADR-022 新增 `document_baseline` 字段保存 ADR/Plan/Spec 对齐文档基线）
      - 写 `.git/spec-vc-commit-msg`（commit message 文本）
      - stdout 输出 `audit-anchor: <anchor>` + 下一步指引
 
@@ -198,9 +198,9 @@ ADR-018 supersedes ADR-011 + ADR-017，ADR-019 在 ADR-018 之上加 carrots 维
 
 2. **subagent 模式（默认，推荐用于复杂变更）**：可启动 audit subagent 做深度代码审查。subagent 仍会通过 PostToolUse hook 写 session log，但本 ADR 后这条通道仅作辅助日志，不再是 commit-msg hook 的硬证据。
 
-3. **simple 模式（推荐用于轻量变更）**：AI 必须在 `--note` 文本里复述 anchor 子串。"通过门禁的最小成本 = 至少看一眼 review 输出抄一次 sha12"。结合 ADR-019 的审查助手报告，simple 模式已经能覆盖大多数场景。
+3. **simple 模式（推荐用于轻量变更）**：`--note` 用于记录审查结论，不再强制包含 anchor 子串。结合 ADR-019 的审查助手报告，simple 模式已经能覆盖大多数场景。
 
-4. **用户实际验证**：审查完成后用户可跑代码、点 UI、测接口。完成后用 `--verified` 标记（写入 `review.json.verified=true`）。默认 honor system；配置 `.spec-vc.toml` 的 `[lightweight] require_user_verified = true` 后升级为硬门禁。
+4. **用户实际验证**：审查完成后用户可跑代码、点 UI、测接口。完成后用 `--verified` 标记（写入 `review.json.verified=true`），该字段仅作记录。
 
 5. **AI 执行 commit**：`spec-vc commit`（薄包装）或直接 `git commit`，commit-msg hook 自动校验。
 
@@ -220,7 +220,7 @@ context_summary_max_bytes = 4096      # review.json.context_summary 截断上限
 
 5. **AI 执行 commit**：`spec-vc commit`（薄包装）或直接 `git commit`，commit-msg hook 自动校验。
 
-#### 6b. commit-msg hook 校验链（ADR-020 减法后，4 步）
+#### 6b. commit-msg hook 校验链（ADR-020 减法后，4 步 + ADR-022 文档基线）
 
 hook 在 `git commit` 时自动触发：
 
@@ -235,6 +235,7 @@ hook 在 `git commit` 时自动触发：
    - `.git/spec-vc-review.json` 存在 + 可解析
    - `review.json.anchor` 匹配当前 staged sha12（不匹配 → 阻塞 + 输出 expected/actual）
    - `review.json` mtime > `.git/spec-vc-commit-msg` mtime（证据不新鲜 → 阻塞）
+   - 若 `review.json.document_baseline` 存在，复算 ADR/Plan/关联 Spec 的文档基线；review 后基线文件集合、存在性或 sha256 漂移 → 阻塞并要求重新 `spec-vc review`
 5. 全部通过 → 放行
 
 **ADR-020 删除的校验项**（移除原因：reasoning scaffolding，详见 `doc/arch/adr-020.md`）：

@@ -1,0 +1,112 @@
+openapi: 3.1.0
+info:
+  title: Spec-022 document baseline freeze
+  version: 0.1.0
+paths:
+  /internal/review:
+    post:
+      summary: spec-vc review writes document_baseline into review.json
+      operationId: writeReviewWithDocumentBaseline
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              description: Full commit message containing [ADR-NNN] or [ADR-none].
+      responses:
+        "0":
+          description: review.json and commit message are written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRecord"
+        "1":
+          description: BlockingError or validation error printed to stderr.
+  /internal/hook/commit-msg:
+    post:
+      summary: commit-msg hook verifies document_baseline for [ADR-NNN]
+      operationId: verifyDocumentBaseline
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              description: Path to the git commit message file.
+      responses:
+        "0":
+          description: Commit message and audit evidence are valid.
+        "1":
+          description: Baseline drift or another hook violation blocks the commit.
+components:
+  schemas:
+    ReviewRecord:
+      type: object
+      required:
+        - anchor
+        - adr_token
+        - staged_sha12
+        - mode
+        - verified
+        - created_at
+      properties:
+        anchor:
+          type: string
+          pattern: "^(ADR-none|ADR-[0-9]{3,})@[0-9a-f]{12}$"
+        adr_token:
+          type: string
+        staged_sha12:
+          type: string
+          pattern: "^[0-9a-f]{12}$"
+        mode:
+          type: string
+          enum: [subagent, simple]
+        verified:
+          type: boolean
+        note:
+          type: string
+        subagent_log_tail:
+          type: [string, "null"]
+        created_at:
+          type: string
+        context_summary:
+          type: string
+        document_baseline:
+          $ref: "#/components/schemas/DocumentBaseline"
+    DocumentBaseline:
+      type: object
+      required:
+        - version
+        - adr_token
+        - files
+      properties:
+        version:
+          type: integer
+          const: 1
+        adr_token:
+          type: string
+          pattern: "^ADR-[0-9]{3,}$"
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/BaselineFile"
+    BaselineFile:
+      type: object
+      required:
+        - path
+        - kind
+        - exists
+        - sha256
+      properties:
+        path:
+          type: string
+          description: Repository-relative path using forward slashes.
+        kind:
+          type: string
+          enum: [adr, plan, spec-dev-doc, spec-formal]
+        exists:
+          type: boolean
+        sha256:
+          type: [string, "null"]
+          pattern: "^[0-9a-f]{64}$"

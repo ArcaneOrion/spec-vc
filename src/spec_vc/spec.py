@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from datetime import date
 
-from ._sections import extract_section, validate_title
+from ._sections import extract_section
 from .errors import ValidationError
 
 

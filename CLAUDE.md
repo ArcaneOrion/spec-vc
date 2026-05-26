@@ -61,16 +61,17 @@ uv run pytest tests/python/ -k "formalize"            # 按关键词筛选
 
 **commit message**: `<type>(<scope>): <subject> [ADR-NNN]`，subject 用中文简述。严格模式(hook)阻塞无 `[ADR-NNN]` 或 `[ADR-none]` 的 commit。
 
-**提交流程**（ADR-018 解耦 + ADR-019 审查助手 + ADR-020 减法，supersedes ADR-011）：
+**提交流程**（ADR-018 解耦 + ADR-019 审查助手 + ADR-020 减法 + ADR-022 文档基线，supersedes ADR-011）：
 - `spec-vc review --mode subagent|simple --message "..." [--note "..."] [--verified]`：独立审查命令
   - 计算 anchor=ADR-XXX@<staged-diff-sha12>
   - **ADR-019**：先调 assemble_review_report 输出 5 段审查报告到 stderr（Staged Diff / Plan / Spec / Static Checks / Your Response），AI 读这份报告就是审查发生
   - 写 `.git/spec-vc-review.json` + `.git/spec-vc-commit-msg`
+  - **ADR-022**：`review.json.document_baseline` 记录当前 ADR/Plan/关联 Spec 的路径、存在性与 sha256，作为审计语义基线
   - **ADR-020**：simple 模式 `--note` 不再强制含 anchor 子串（移除 reasoning scaffolding）
   - `--verified` 仅作记录，hook 不再校验（ADR-020 删除 `require_user_verified` 升级开关）
 - 用户可在审查后跑代码、点 UI、测接口验证使用
 - `spec-vc commit`（薄包装）或直接 `git commit`，commit-msg hook 自动校验
-- **commit-msg hook 校验链 4 步（ADR-020 减法后）**：SPEC_VC_BYPASS → ADR 引用 → [ADR-NNN] Spec 完整性 + review.json (anchor 匹配 + mtime 新鲜) → 放行；[ADR-none] 直接放行
+- **commit-msg hook 校验链 4 步（ADR-020 减法后 + ADR-022）**：SPEC_VC_BYPASS → ADR 引用 → [ADR-NNN] Spec 完整性 + review.json (anchor 匹配 + mtime 新鲜 + document_baseline 未漂移) → 放行；[ADR-none] 直接放行
 - 所有阻塞错误统一为 BlockingError 结构（reason / current_state / fix_commands / docs_ref），AI 读 stderr 后可按 fix_commands 修复
 - `commit prepare` 保留为 deprecation alias（等价于 `review --mode subagent`），打 warning
 

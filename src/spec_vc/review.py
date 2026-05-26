@@ -39,6 +39,7 @@ class ReviewRecord:
     subagent_log_tail: str | None = None
     created_at: str = field(default_factory=lambda: datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
     context_summary: str = ""
+    document_baseline: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,6 +76,7 @@ def read_review(repo_root: Path) -> ReviewRecord | None:
             subagent_log_tail=data.get("subagent_log_tail"),
             created_at=str(data["created_at"]),
             context_summary=str(data.get("context_summary", "")),
+            document_baseline=data.get("document_baseline") if isinstance(data.get("document_baseline"), dict) else None,
         )
     except (KeyError, TypeError, ValueError):
         return None
